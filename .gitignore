@@ -1,5 +1,45 @@
-.DS_Store
-PROJECT_STATE.md
-README.md
+# Mosaïque — .gitignore
+#
+# Rule of thumb: version what a person wrote, ignore what a machine can
+# regenerate. The current file has this backwards — it tracks node_modules and
+# ignores PROJECT_STATE.md.
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- Node ---
+node_modules/
+dist/
+*.tsbuildinfo
+
+# --- Playwright ---
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# --- Local configuration and secrets ---
 .env
-docs/
+.env.local
+.env.*.local
+
+# --- Runtime data ---
+# Raw per-participant PCM (ADR-06). Never commit meeting audio.
+audio/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# NOT ignored, deliberately:
+#   PROJECT_STATE.md  — the only document that describes reality (D-03)
+#   README.md         — how a new engineer gets the system running
+#   docs/             — technical spec, blueprint, implementation plan, ADRs
+#   frontend/openapi.json — the committed contract; CI diffs against it
