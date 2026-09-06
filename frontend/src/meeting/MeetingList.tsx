@@ -20,11 +20,12 @@ function formatDate(iso: string): string {
   }).format(new Date(iso));
 }
 
-export function MeetingList() {
+export function MeetingList({ onOpenReview }: { onOpenReview: (meetingId: string) => void }) {
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [title, setTitle] = useState("");
   const [error, setError] = useState<ApiError | null>(null);
   const [creating, setCreating] = useState(false);
+  const [invite, setInvite] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -47,6 +48,7 @@ export function MeetingList() {
     try {
       const created = await api.createMeeting(title.trim());
       token.set(created.host_token);
+      setInvite(created.invite_url);
       setTitle("");
       await load();
     } catch (e) {
@@ -86,6 +88,13 @@ export function MeetingList() {
         </button>
       </div>
 
+      {invite && (
+        <div className="notice">
+          <div>Lien d'invitation créé. Ouvrez-le pour rejoindre et parler.</div>
+          <a href={invite}>{invite}</a>
+        </div>
+      )}
+
       {meetings === null ? (
         <div className="empty">Chargement…</div>
       ) : meetings.length === 0 ? (
@@ -96,7 +105,14 @@ export function MeetingList() {
       ) : (
         <div className="ledger">
           {meetings.map((m) => (
-            <div className="row" key={m.id}>
+            <div
+              className="row row-clickable"
+              key={m.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => m.state === "COMPLETED" && onOpenReview(m.id)}
+              onKeyDown={(e) => e.key === "Enter" && m.state === "COMPLETED" && onOpenReview(m.id)}
+            >
               <p className="row-title">{m.title}</p>
               <span className="state">
                 <span className="tessera" data-state={m.state} />
