@@ -1,0 +1,296 @@
+/*
+ * Mosaïque — visual system.
+ *
+ * The name is the brief. A mosaic is many small attributed pieces composing one
+ * whole, which is exactly what a speaker-attributed transcript is. The palette
+ * comes from zellige glaze — deep azure and verdigris on porcelain — which also
+ * quietly bridges the French product and its Darija roadmap.
+ */
+
+:root {
+  --ink: #11212d;
+  --ink-soft: #4a5c68;
+  --azure: #1b5e8c;
+  --verdigris: #2f7a6b;
+  --saffron: #b8801f;
+  --porcelain: #edf0f1;
+  --surface: #ffffff;
+  --grout: #d5dcdf;
+
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+
+  --tile: 4px;
+  --rail: 232px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--porcelain);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--azure);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- shell ---------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  min-height: 100%;
+}
+
+.rail {
+  background: var(--ink);
+  color: var(--porcelain);
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wordmark h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.rail p {
+  color: #9fb2bd;
+  font-size: 13px;
+  margin: 0;
+  max-width: 30ch;
+}
+
+.rail-foot {
+  margin-top: auto;
+  font-size: 12px;
+  color: #7c93a1;
+}
+
+.main {
+  padding: 40px 44px 64px;
+  max-width: 900px;
+}
+
+/* ---------- header ---------- */
+
+.head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.head h2 {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+}
+
+.head p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+/* ---------- controls ---------- */
+
+button {
+  font: inherit;
+  font-weight: 500;
+  border-radius: var(--tile);
+  border: 1px solid transparent;
+  padding: 9px 16px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.btn-primary {
+  background: var(--azure);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #17527a;
+}
+.btn-primary:disabled {
+  background: var(--ink-soft);
+  cursor: not-allowed;
+}
+
+.btn-quiet {
+  background: transparent;
+  border-color: var(--grout);
+  color: var(--ink);
+}
+.btn-quiet:hover {
+  background: var(--surface);
+}
+
+input[type="text"] {
+  font: inherit;
+  padding: 9px 12px;
+  border: 1px solid var(--grout);
+  border-radius: var(--tile);
+  background: var(--surface);
+  color: var(--ink);
+  width: 100%;
+}
+
+.field-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+/* ---------- meeting list ---------- */
+/* Rows, not cards: a list of meetings is a ledger, and rows compare better. */
+
+.ledger {
+  background: var(--surface);
+  border: 1px solid var(--grout);
+  border-radius: var(--tile);
+  overflow: hidden;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 20px;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--grout);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row-title {
+  font-weight: 500;
+  margin: 0;
+}
+
+.row-meta {
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+/* The state dot is a tessera, not a circle — the mosaic motif at 8px. */
+.tessera {
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  background: var(--ink-soft);
+}
+.tessera[data-state="JOINABLE"] {
+  background: var(--verdigris);
+}
+.tessera[data-state="LIVE"] {
+  background: var(--azure);
+}
+.tessera[data-state="FINALIZING"] {
+  background: var(--saffron);
+}
+
+/* ---------- states ---------- */
+
+.empty {
+  background: var(--surface);
+  border: 1px dashed var(--grout);
+  border-radius: var(--tile);
+  padding: 44px 24px;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.empty strong {
+  display: block;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.notice {
+  border-left: 3px solid var(--saffron);
+  background: var(--surface);
+  padding: 12px 16px;
+  border-radius: 0 var(--tile) var(--tile) 0;
+  margin-bottom: 20px;
+}
+
+.notice code {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+  .rail {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+  }
+  .rail p,
+  .rail-foot {
+    display: none;
+  }
+  .main {
+    padding: 24px 20px 48px;
+  }
+  .row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}

@@ -1,0 +1,68 @@
+[project]
+name = "mosaique"
+version = "0.1.0"
+description = "Mosaique - realtime meeting intelligence, French"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "python-ulid>=3.0",
+    "pyjwt>=2.10",
+    "structlog>=24.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.28",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "psycopg[binary]>=3.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mosaique"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "TID"]
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic autogenerates long op.create_index lines; reformatting them by hand
+# would make future autogenerate diffs noisy for no benefit.
+"src/mosaique/persistence/migrations/versions/*" = ["E501"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"moshi".msg = "Model-specific imports belong in speech/adapters/kyutai only (tech spec 9.1)."
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["mosaique"]
+plugins = []
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["integration: requires PostgreSQL"]

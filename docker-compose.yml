@@ -1,0 +1,44 @@
+# Slice 0 topology: two of the four processes from tech spec 2.1.
+# asr-runtime arrives in Slice 4; the audio store volume in Slice 1.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mosaique
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mosaique}
+      POSTGRES_DB: mosaique
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mosaique -d mosaique"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app-server:
+    build: ./backend
+    entrypoint: ["/app/entrypoint.sh"]
+    command:
+      ["uvicorn", "mosaique.app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      MOSAIQUE_ENVIRONMENT: local
+      MOSAIQUE_DATABASE_URL: postgresql+asyncpg://mosaique:${POSTGRES_PASSWORD:-mosaique}@postgres:5432/mosaique
+      MOSAIQUE_TOKEN_SECRET: ${MOSAIQUE_TOKEN_SECRET:-local-development-secret-min-32-chars}
+      MOSAIQUE_CORS_ORIGINS: '["http://localhost:5173","http://localhost:8080"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - app-server
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
