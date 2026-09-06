@@ -1,0 +1,147 @@
+"""Meeting intelligence job processor (tech spec 12.1).
+
+An in-process asyncio task, not a separate service (blueprint R-5). The module
+boundary is kept so splitting it out later is a deployment change, not a
+rewrite.
+
+Two invariants worth stating:
+
+* a failed job never touches the transcript or the meeting state;
+* `MeetingOutputs` is written only on success, so `Job` is the single owner of
+  execution state and the two cannot drift (blueprint X-12).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+from datetime import UTC, datetime, timedelta
+
+from mosaique.intelligence.prompt import SYSTEM_PROMPT, build_user_prompt
+from mosaique.intelligence.provider import LLMProvider
+from mosaique.intelligence.schema import (
+    MeetingIntelligence,
+    OutputValidationError,
+    validate_outputs,
+)
+from mosaique.observability.logging import get_logger
+from mosaique.persistence.engine import session_scope
+from mosaique.persistence.models import Job
+from mosaique.persistence.repositories.transcript import (
+    JobRepository,
+    OutputsRepository,
+    ParticipantRepository,
+    SegmentRepository,
+)
+
+log = get_logger(__name__)
+
+PROCESSOR_VERSION = "summarizer-v1"
+JOB_KIND = "meeting_intelligence"
+LLM_DEADLINE_S = 60.0
+MAX_ATTEMPTS = 3
+BACKOFF_S = (30, 120, 480)
+
+
+class MeetingIntelligenceProcessor:
+    def __init__(self, provider: LLMProvider, *, poll_interval_s: float = 1.0) -> None:
+        self._provider = provider
+        self._poll_interval_s = poll_interval_s
+        self._task: asyncio.Task[None] | None = None
+        self._stopping = asyncio.Event()
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._loop())
+
+    async def stop(self) -> None:
+        self._stopping.set()
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+    async def _loop(self) -> None:
+        while not self._stopping.is_set():
+            try:
+                processed = await self.run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.error("job_loop_failed", error_type=type(exc).__name__)
+                processed = False
+            if not processed:
+                await asyncio.sleep(self._poll_interval_s)
+
+    async def run_once(self) -> bool:
+        """Claim and run at most one job. Returns True when one was claimed."""
+        async with session_scope() as db:
+            job = await JobRepository(db).claim_one()
+            if job is None:
+                return False
+            job_id, meeting_id, organization_id = job.id, job.meeting_id, job.organization_id
+            attempts = job.attempts
+            payload = dict(job.payload or {})
+
+        try:
+            await self._run_job(meeting_id, organization_id, payload)
+        except Exception as exc:
+            await self._record_failure(job_id, attempts, exc)
+            return True
+
+        async with session_scope() as db:
+            claimed = await db.get(Job, job_id)
+            if claimed is not None:
+                claimed.status = "succeeded"
+                claimed.last_error = None
+        log.info("job_succeeded", meeting_id=meeting_id, job_id=job_id)
+        return True
+
+    async def _run_job(
+        self, meeting_id: str, organization_id: str, payload: dict[str, object]
+    ) -> None:
+        async with session_scope() as db:
+            segments = await SegmentRepository(db, organization_id).list_for_meeting(meeting_id)
+            participants = await ParticipantRepository(db, organization_id).list_for_meeting(
+                meeting_id
+            )
+
+        if not segments:
+            raise RuntimeError("no final segments to summarize")
+
+        display_names = {p.id: p.display_name for p in participants}
+        user_prompt = build_user_prompt(segments, display_names)
+
+        raw = await asyncio.wait_for(
+            self._provider.complete_json(
+                SYSTEM_PROMPT,
+                user_prompt,
+                MeetingIntelligence.model_json_schema(),
+                LLM_DEADLINE_S,
+            ),
+            timeout=LLM_DEADLINE_S,
+        )
+        outputs = validate_outputs(raw, {s.id for s in segments})
+
+        async with session_scope() as db:
+            await OutputsRepository(db, organization_id).store(
+                meeting_id=meeting_id,
+                transcript_version=int(str(payload.get("transcript_version", 1))),
+                processor_version=PROCESSOR_VERSION,
+                llm_model=self._provider.model_name,
+                outputs=outputs.model_dump(),
+            )
+
+    async def _record_failure(self, job_id: str, attempts: int, exc: Exception) -> None:
+        reason = f"{exc.reason}: {exc}" if isinstance(exc, OutputValidationError) else str(exc)
+        async with session_scope() as db:
+            job = await db.get(Job, job_id)
+            if job is None:
+                return
+            if attempts >= MAX_ATTEMPTS:
+                job.status = "failed"
+            else:
+                job.status = "pending"
+                backoff = BACKOFF_S[min(attempts - 1, len(BACKOFF_S) - 1)]
+                job.next_run_at = datetime.now(UTC) + timedelta(seconds=backoff)
+            job.last_error = reason[:500]
+        log.warning("job_attempt_failed", job_id=job_id, attempts=attempts)

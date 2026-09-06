@@ -8,6 +8,7 @@ Nothing in the codebase reads `os.environ` directly.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, PostgresDsn, field_validator
@@ -41,6 +42,9 @@ class Settings(BaseSettings):
     seed_host_display_name: str = "Pilote"
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+
+    # Raw per-participant PCM (ADR-06). Retention policy is still open (Q3).
+    audio_root: Path = Path("audio")
 
     # Refused in production config (tech spec 13.3).
     log_transcript_text: bool = False

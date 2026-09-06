@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "generate:api": "openapi-typescript openapi.json -o src/api/schema.d.ts"
+    "generate:api": "openapi-typescript openapi.json -o src/api/schema.d.ts",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -21,6 +23,8 @@
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
-    "openapi-typescript": "^7.4.4"
+    "openapi-typescript": "^7.4.4",
+    "vitest": "^2.1.8",
+    "@playwright/test": "^1.49.1"
   }
 }

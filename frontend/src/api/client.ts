@@ -59,6 +59,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+export type TranscriptResponse = components["schemas"]["TranscriptResponse"];
+export type OutputsResponse = components["schemas"]["OutputsResponse"];
+export type JoinResponse = components["schemas"]["JoinResponse"];
+
 export const api = {
   livez: () => request<{ status: string; version: string }>("/livez"),
   listMeetings: () => request<{ meetings: Meeting[] }>("/meetings"),
@@ -68,4 +72,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ title }),
     }),
+  join: (meetingId: string, displayName: string, inviteToken: string) =>
+    request<JoinResponse>(`/meetings/${meetingId}/join`, {
+      method: "POST",
+      body: JSON.stringify({ display_name: displayName, invite_token: inviteToken }),
+    }),
+  endMeeting: (meetingId: string) =>
+    request<{ meeting: Meeting }>(`/meetings/${meetingId}/end`, { method: "POST" }),
+  transcript: (meetingId: string) =>
+    request<TranscriptResponse>(`/meetings/${meetingId}/transcript`),
+  outputs: (meetingId: string) => request<OutputsResponse>(`/meetings/${meetingId}/outputs`),
 };

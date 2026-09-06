@@ -65,10 +65,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/meetings/{meeting_id}/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join Meeting
+         * @description Exchange an invite token for a session token (tech spec 13.1).
+         *
+         *     The only unauthenticated route. The invite token is compared against its
+         *     stored hash; it is never held in plain text on the server.
+         */
+        post: operations["join_meeting_meetings__meeting_id__join_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/meetings/{meeting_id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End Meeting
+         * @description End a meeting (tech spec 11). Idempotent: calling it twice is a no-op.
+         *
+         *     Ordering matters. The drain runs to a durable boundary *before* the meeting
+         *     is marked COMPLETED, so a crash mid-finalization leaves FINALIZING for the
+         *     startup recovery routine rather than a COMPLETED meeting missing segments.
+         */
+        post: operations["end_meeting_meetings__meeting_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/meetings/{meeting_id}/transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Transcript
+         * @description Final segments in display order. Interim text is never stored (ADR-05).
+         */
+        get: operations["get_transcript_meetings__meeting_id__transcript_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/meetings/{meeting_id}/outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Outputs
+         * @description Outputs when they exist, otherwise 202 with the job's state.
+         */
+        get: operations["get_outputs_meetings__meeting_id__outputs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActionItemView */
+        ActionItemView: {
+            /** Text */
+            text: string;
+            /** Evidence Segment Ids */
+            evidence_segment_ids: string[];
+            /** Owner Participant Id */
+            owner_participant_id?: string | null;
+            /** Owner Text */
+            owner_text?: string | null;
+            /** Due Text */
+            due_text?: string | null;
+        };
         /** CreateMeetingRequest */
         CreateMeetingRequest: {
             /** Title */
@@ -81,6 +181,10 @@ export interface components {
             host_token: string;
             /** Invite Url */
             invite_url: string;
+        };
+        /** EndMeetingResponse */
+        EndMeetingResponse: {
+            meeting: components["schemas"]["MeetingView"];
         };
         /** ErrorBody */
         ErrorBody: {
@@ -98,6 +202,13 @@ export interface components {
         ErrorEnvelope: {
             error: components["schemas"]["ErrorBody"];
         };
+        /** EvidenceItem */
+        EvidenceItem: {
+            /** Text */
+            text: string;
+            /** Evidence Segment Ids */
+            evidence_segment_ids: string[];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -109,6 +220,22 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /** JoinRequest */
+        JoinRequest: {
+            /** Display Name */
+            display_name: string;
+            /** Invite Token */
+            invite_token: string;
+        };
+        /** JoinResponse */
+        JoinResponse: {
+            participant: components["schemas"]["ParticipantView"];
+            /** Session Token */
+            session_token: string;
+            /** Ws Url */
+            ws_url: string;
+            meeting: components["schemas"]["MeetingView"];
         };
         /** MeetingDetailView */
         MeetingDetailView: {
@@ -165,6 +292,26 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * OutputsResponse
+         * @description 202 while the job is pending; the body's `status` says which (X-12).
+         */
+        OutputsResponse: {
+            /** Status */
+            status: string;
+            /** Summary */
+            summary?: string | null;
+            /** Key Points */
+            key_points?: string[];
+            /** Decisions */
+            decisions?: components["schemas"]["EvidenceItem"][];
+            /** Action Items */
+            action_items?: components["schemas"]["ActionItemView"][];
+            /** Open Questions */
+            open_questions?: components["schemas"]["EvidenceItem"][];
+            /** Error Code */
+            error_code?: string | null;
+        };
         /** ParticipantView */
         ParticipantView: {
             /** Id */
@@ -173,6 +320,34 @@ export interface components {
             display_name: string;
             /** Role */
             role: string;
+        };
+        /** SegmentView */
+        SegmentView: {
+            /** Id */
+            id: string;
+            /** Participant Id */
+            participant_id: string;
+            /** Sequence */
+            sequence: number;
+            /** Start Ms */
+            start_ms: number;
+            /** End Ms */
+            end_ms: number;
+            /** Text */
+            text: string;
+            /** Status */
+            status: string;
+        };
+        /** TranscriptResponse */
+        TranscriptResponse: {
+            /** Meeting Id */
+            meeting_id: string;
+            /** Transcript Version */
+            transcript_version: number | null;
+            /** Participants */
+            participants: components["schemas"]["ParticipantView"][];
+            /** Segments */
+            segments: components["schemas"]["SegmentView"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -374,6 +549,284 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MeetingDetailView"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not permitted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    join_meeting_meetings__meeting_id__join_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JoinRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JoinResponse"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not permitted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    end_meeting_meetings__meeting_id__end_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndMeetingResponse"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not permitted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_transcript_meetings__meeting_id__transcript_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptResponse"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not permitted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_outputs_meetings__meeting_id__outputs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutputsResponse"];
                 };
             };
             /** @description Missing or invalid token */

@@ -294,3 +294,136 @@ input[type="text"] {
     gap: 6px;
   }
 }
+
+/* ---------- consent, live meeting, review ---------- */
+
+.consent {
+  background: var(--surface);
+  border: 1px solid var(--grout);
+  border-left: 3px solid var(--verdigris);
+  border-radius: 0 var(--tile) var(--tile) 0;
+  padding: 16px 18px;
+  margin-bottom: 22px;
+}
+
+.consent strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.consent p {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
+.consent-tip {
+  color: var(--azure) !important;
+}
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--grout);
+  border-radius: var(--tile);
+  margin-bottom: 20px;
+}
+
+.meter {
+  flex: 1;
+  height: 6px;
+  background: var(--porcelain);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--verdigris);
+  transition: width 90ms linear;
+}
+
+.transcript {
+  background: var(--surface);
+  border: 1px solid var(--grout);
+  border-radius: var(--tile);
+  padding: 8px 18px;
+}
+
+/* Interim text is visibly provisional: the reader must be able to tell what
+   the system has committed from what it may still revise. */
+.line {
+  margin: 10px 0;
+  padding-left: 12px;
+  border-left: 2px solid transparent;
+}
+
+.line-interim {
+  color: var(--ink-soft);
+  border-left-color: var(--grout);
+  font-style: italic;
+}
+
+.line-final {
+  color: var(--ink);
+  border-left-color: var(--azure);
+}
+
+.speaker {
+  display: inline-block;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--azure);
+  margin-right: 10px;
+}
+
+.outputs {
+  background: var(--surface);
+  border: 1px solid var(--grout);
+  border-radius: var(--tile);
+  padding: 4px 20px 18px;
+  margin-bottom: 26px;
+}
+
+.outputs h3,
+.transcript-heading {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  margin: 20px 0 8px;
+}
+
+.outputs ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.outputs li {
+  margin-bottom: 8px;
+}
+
+.evidence,
+.owner,
+.due {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  background: var(--porcelain);
+  border-radius: 1px;
+  padding: 1px 7px;
+}
+
+.row-clickable {
+  cursor: default;
+}
+
+.notice a {
+  color: var(--azure);
+  font-size: 13px;
+  word-break: break-all;
+}

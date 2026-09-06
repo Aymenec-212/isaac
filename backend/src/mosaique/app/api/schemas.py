@@ -59,6 +59,64 @@ class MeetingListResponse(BaseModel):
     meetings: list[MeetingView]
 
 
+class JoinRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=120)
+    invite_token: str
+
+
+class JoinResponse(BaseModel):
+    participant: ParticipantView
+    session_token: str
+    ws_url: str
+    meeting: MeetingView
+
+
+class SegmentView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    participant_id: str
+    sequence: int
+    start_ms: int
+    end_ms: int
+    text: str
+    status: str
+
+
+class TranscriptResponse(BaseModel):
+    meeting_id: str
+    transcript_version: int | None
+    participants: list[ParticipantView]
+    segments: list[SegmentView]
+
+
+class EvidenceItem(BaseModel):
+    text: str
+    evidence_segment_ids: list[str]
+
+
+class ActionItemView(EvidenceItem):
+    owner_participant_id: str | None = None
+    owner_text: str | None = None
+    due_text: str | None = None
+
+
+class OutputsResponse(BaseModel):
+    """202 while the job is pending; the body's `status` says which (X-12)."""
+
+    status: str  # pending | running | failed | succeeded
+    summary: str | None = None
+    key_points: list[str] = Field(default_factory=list)
+    decisions: list[EvidenceItem] = Field(default_factory=list)
+    action_items: list[ActionItemView] = Field(default_factory=list)
+    open_questions: list[EvidenceItem] = Field(default_factory=list)
+    error_code: str | None = None
+
+
+class EndMeetingResponse(BaseModel):
+    meeting: MeetingView
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str
