@@ -3,6 +3,8 @@ import { api, type JoinResponse } from "../api/client";
 import { MicrophoneCapture } from "../audio/capture";
 import { MeetingClient, type ConnectionState } from "../realtime/client";
 import { TranscriptReconciler, type TranscriptEntry } from "../realtime/reconciler";
+import { ParticipantRoster, type RosterEntry } from "../realtime/roster";
+import { ParticipantPanel } from "./ParticipantPanel";
 
 const CONNECTION_LABEL: Record<ConnectionState, string> = {
   connecting: "Connexion…",
@@ -21,12 +23,15 @@ export function LiveMeeting({
   onEnded: () => void;
 }) {
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
+  const [participants, setParticipants] = useState<RosterEntry[]>([]);
+  const [selfId, setSelfId] = useState<string | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [level, setLevel] = useState(0);
   const [micError, setMicError] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
 
   const reconciler = useRef(new TranscriptReconciler());
+  const roster = useRef(new ParticipantRoster());
   const client = useRef<MeetingClient | null>(null);
   const capture = useRef<MicrophoneCapture | null>(null);
 
@@ -38,7 +43,11 @@ export function LiveMeeting({
       onTranscript: (message) => {
         if (reconciler.current.apply(message)) setEntries(reconciler.current.ordered());
       },
-      onHelloOk: () => {
+      onRoster: (message) => {
+        if (roster.current.apply(message)) setParticipants(roster.current.ordered());
+      },
+      onHelloOk: (participantId) => {
+        setSelfId(participantId);
         const mic = new MicrophoneCapture();
         capture.current = mic;
         mic
@@ -92,6 +101,8 @@ export function LiveMeeting({
         )}
       </div>
 
+      <ParticipantPanel entries={participants} selfId={selfId} />
+
       <div className="statusbar">
         <span className="state">
           <span className="tessera" data-state={connection === "live" ? "LIVE" : ""} />
@@ -117,7 +128,7 @@ export function LiveMeeting({
         <div className="transcript">
           {entries.map((entry) => (
             <p key={entry.key} className={`line line-${entry.status}`}>
-              <span className="speaker">{joined.participant.display_name}</span>
+              <span className="speaker">{roster.current.nameFor(entry.participantId)}</span>
               {entry.text}
             </p>
           ))}

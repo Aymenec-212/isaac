@@ -32,7 +32,11 @@ blob-report/
 
 # --- Runtime data ---
 # Raw per-participant PCM (ADR-06). Never commit meeting audio.
-audio/
+# Anchored deliberately: a bare `audio/` also matches the source package
+# `backend/src/mosaique/speech/audio/`, which is how `store.py` was silently
+# dropped from the repository once already.
+/audio/
+/backend/audio/
 
 # --- OS ---
 .DS_Store

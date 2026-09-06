@@ -6,9 +6,15 @@ import asyncio
 import contextlib
 import json
 import os
+import socket
+import subprocess
+import sys
+import time
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -218,6 +224,78 @@ async def ws_client(engine, runtime):  # type: ignore[no-untyped-def]
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         yield WsClient(http=http, app=app)
+
+
+@dataclass(frozen=True)
+class LiveServer:
+    base_url: str
+    audio_root: Path
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+@pytest.fixture(scope="module")
+def live_server(settings, tmp_path_factory):  # type: ignore[no-untyped-def]
+    """A real app-server in its own process, for the replay harness.
+
+    In-process ASGI is enough for the gateway tests, but not for this one: the
+    harness's whole claim is that it drives the product the way a browser does,
+    over a real socket. Proving that needs a real socket. It is also what makes
+    the cross-machine run (A-8) the same code path with a different `--base-url`.
+
+    Module-scoped on purpose. The server runs its own job processor, and a
+    session-scoped one would sit there claiming jobs that
+    `test_intelligence_flow` means to drive by hand.
+    """
+    port = _free_port()
+    audio_root = tmp_path_factory.mktemp("replay-audio")
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "mosaique.app.main:create_app",
+            "--factory",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        env={
+            **os.environ,
+            "MOSAIQUE_DATABASE_URL": str(settings.database_url),
+            "MOSAIQUE_TOKEN_SECRET": settings.token_secret,
+            "MOSAIQUE_ENVIRONMENT": "ci",
+            "MOSAIQUE_AUDIO_ROOT": str(audio_root),
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                output = process.stdout.read().decode() if process.stdout else ""
+                raise RuntimeError(f"app-server exited during startup:\n{output}")
+            with contextlib.suppress(Exception):
+                if httpx.get(f"{base_url}/livez", timeout=1.0).status_code == 200:
+                    break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("app-server did not become ready within 30 s")
+        yield LiveServer(base_url=base_url, audio_root=audio_root)
+    finally:
+        process.terminate()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=10)
+        process.kill()
 
 
 def host_token_for(settings, tenant) -> str:  # type: ignore[no-untyped-def]

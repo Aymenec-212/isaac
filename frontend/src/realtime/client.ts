@@ -1,11 +1,13 @@
 /** Meeting WebSocket client (tech spec 7). Reconnect arrives in Slice 3. */
 import { encodeFrame } from "./frames";
 import type { TranscriptMessage } from "./reconciler";
+import { isRosterMessage, type RosterMessage } from "./roster";
 
 export type ConnectionState = "connecting" | "live" | "closed" | "error";
 
 export interface MeetingClientHandlers {
   onTranscript: (message: TranscriptMessage) => void;
+  onRoster: (message: RosterMessage) => void;
   onHelloOk: (participantId: string) => void;
   onMeetingState: (state: string) => void;
   onConnectionState: (state: ConnectionState) => void;
@@ -43,6 +45,12 @@ export class MeetingClient {
 
     this.socket.onmessage = (event) => {
       const message = JSON.parse(event.data as string);
+      // The roster is replayed to a joining socket before `hello.ok` can
+      // arrive, so these are handled ahead of the connection state.
+      if (isRosterMessage(message)) {
+        this.handlers.onRoster(message);
+        return;
+      }
       switch (message.type) {
         case "hello.ok":
           this.handlers.onConnectionState("live");

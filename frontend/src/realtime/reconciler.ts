@@ -79,10 +79,19 @@ export class TranscriptReconciler {
     for (const segment of segments) this.apply(segment);
   }
 
-  /** Display order: across participants by start time (tech spec 4). */
+  /** Display order: across participants by start time (tech spec 4).
+   *
+   * `participantId` breaks a tie before `sequence` does, matching the order
+   * `GET /transcript` returns. Two participants can share a `startMs` — their
+   * streams are anchored independently — and without a stable tiebreak the
+   * hydrated view and the live view could disagree about which came first.
+   */
   ordered(): TranscriptEntry[] {
     return [...this.entries.values()].sort(
-      (a, b) => a.startMs - b.startMs || a.sequence - b.sequence,
+      (a, b) =>
+        a.startMs - b.startMs ||
+        a.participantId.localeCompare(b.participantId) ||
+        a.sequence - b.sequence,
     );
   }
 

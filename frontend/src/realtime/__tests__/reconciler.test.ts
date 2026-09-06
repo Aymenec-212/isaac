@@ -83,3 +83,39 @@ describe("TranscriptReconciler", () => {
     expect(r.ordered().map((e) => e.text)).toEqual(["récupéré", "en direct"]);
   });
 });
+
+describe("cross-participant display order (Slice 2)", () => {
+  it("orders by start time across participants, not by arrival", () => {
+    const r = new TranscriptReconciler();
+    r.apply(final(0, 1, "Amina d'abord", 600, "amina"));
+    r.apply(final(0, 1, "Bruno ensuite", 2200, "bruno"));
+    r.apply(final(1, 1, "Amina encore", 3200, "amina"));
+
+    expect(r.ordered().map((e) => e.text)).toEqual([
+      "Amina d'abord",
+      "Bruno ensuite",
+      "Amina encore",
+    ]);
+  });
+
+  it("breaks a tie on participant id, so hydrate and live agree", () => {
+    const a = new TranscriptReconciler();
+    a.apply(final(0, 1, "de bruno", 1000, "bruno"));
+    a.apply(final(0, 1, "d'amina", 1000, "amina"));
+
+    const b = new TranscriptReconciler();
+    b.apply(final(0, 1, "d'amina", 1000, "amina"));
+    b.apply(final(0, 1, "de bruno", 1000, "bruno"));
+
+    expect(a.ordered().map((e) => e.text)).toEqual(b.ordered().map((e) => e.text));
+  });
+
+  it("keeps each participant's segments under their own key", () => {
+    const r = new TranscriptReconciler();
+    r.apply(delta(0, 1, "Amina parle", 600, "amina"));
+    r.apply(delta(0, 1, "Bruno parle", 600, "bruno"));
+
+    expect(r.ordered()).toHaveLength(2);
+    expect(r.ordered().map((e) => e.participantId).sort()).toEqual(["amina", "bruno"]);
+  });
+});

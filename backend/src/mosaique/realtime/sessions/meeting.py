@@ -32,6 +32,8 @@ from mosaique.realtime.ingress import (
     ParticipantLeft,
 )
 from mosaique.realtime.protocol.messages import (
+    ParticipantEvent,
+    ParticipantSpeaking,
     TranscriptDelta,
     TranscriptSegmentFinal,
 )
@@ -90,6 +92,11 @@ class MeetingRuntime:
         self._started_at_ms = started_at_ms
 
         self._sessions: dict[str, ParticipantSession] = {}
+        # The roster is built from ingress events alone. The runtime never asks
+        # the transport how many sockets exist, which is what keeps blueprint
+        # D-04 honest once there is more than one participant.
+        self._roster: dict[str, str] = {}
+        self._speaking: set[str] = set()
         self._files: dict[str, BinaryIO] = {}
         self._pumps: dict[str, asyncio.Task[None]] = {}
         self._first_word_seen: set[str] = set()
@@ -166,10 +173,37 @@ class MeetingRuntime:
             self.meeting.meeting_id, event.audio_session_id
         )
         self._pumps[event.participant_id] = asyncio.create_task(self._pump(session))
+        await self._announce(event)
         log.info(
             "participant_stream_opened",
             participant_id=event.participant_id,
             epoch_ms=epoch_ms,
+        )
+
+    async def _announce(self, event: ParticipantJoined) -> None:
+        """Tell the newcomer who is already here, then tell everyone about them.
+
+        Replaying the roster to the joining socket rather than inventing a
+        separate roster message keeps one message shape for the client to
+        handle, and makes a late join look exactly like a live one.
+        """
+        for participant_id, display_name in self._roster.items():
+            await self._broadcaster.send_to(
+                event.participant_id,
+                ParticipantEvent(
+                    type="participant.joined",
+                    participant_id=participant_id,
+                    display_name=display_name,
+                ).model_dump(),
+            )
+        self._roster[event.participant_id] = event.display_name
+        await self._broadcaster.publish(
+            self.meeting.meeting_id,
+            ParticipantEvent(
+                type="participant.joined",
+                participant_id=event.participant_id,
+                display_name=event.display_name,
+            ).model_dump(),
         )
 
     def _on_frame(self, frame: IngressAudioFrame) -> None:
@@ -195,8 +229,13 @@ class MeetingRuntime:
                 # the pump can drain a full queue without once yielding and
                 # starve the reader that is turning those frames into text.
                 await asyncio.sleep(0)
-                # Silence closes a segment; that check needs a tick (tech spec 9.3).
-                await self._emit(session, session.segmenter.on_tick(session.stream_offset_ms))
+                # No tick here. `stream_offset_ms` is audio *pushed*, which runs
+                # ahead of what the recognizer has transcribed by the model
+                # delay, so ticking on it compares two different clocks and
+                # splits a phrase whenever the reader is behind — which is
+                # exactly what a replay makes happen. `_read_events` owns the
+                # tick, and does it against `transcribed_offset_ms` only once
+                # the reader has caught up (ADR-11).
         except asyncio.CancelledError:
             raise
         finally:
@@ -213,6 +252,8 @@ class MeetingRuntime:
 
     async def _read_events(self, session: ParticipantSession) -> None:
         """Single owner of the segmenter: recognizer events in, segments out.
+
+        "Single owner" is literal, and the frame pump must not tick it.
 
         The silence tick lives here rather than in the frame pump for a reason.
         Ticking from the pump would compare the segmenter's last word against
@@ -276,10 +317,21 @@ class MeetingRuntime:
         elif isinstance(event, ASRErrorEvent):
             log.warning("asr_error", code=event.code, fatal=event.fatal)
 
+    async def _set_speaking(self, participant_id: str, speaking: bool) -> None:
+        """Publish only on a transition, so the panel does not flicker."""
+        if speaking == (participant_id in self._speaking):
+            return
+        self._speaking.symmetric_difference_update({participant_id})
+        await self._broadcaster.publish(
+            self.meeting.meeting_id,
+            ParticipantSpeaking(participant_id=participant_id, speaking=speaking).model_dump(),
+        )
+
     async def _emit(self, session: ParticipantSession, events: Sequence[SegmenterEvent]) -> None:
         for raw in events:
             event = shift(raw, session.epoch_ms)
             if isinstance(event, SegmentDelta):
+                await self._set_speaking(session.participant_id, True)
                 await self._broadcaster.publish(
                     self.meeting.meeting_id,
                     TranscriptDelta(
@@ -291,6 +343,7 @@ class MeetingRuntime:
                     ).model_dump(),
                 )
             elif isinstance(event, SegmentFinal):
+                await self._set_speaking(session.participant_id, False)
                 await self._persist_and_publish(session, event)
 
     async def _persist_and_publish(self, session: ParticipantSession, event: SegmentFinal) -> None:
@@ -358,6 +411,17 @@ class MeetingRuntime:
         self._files.clear()
 
     async def _close_participant(self, participant_id: str) -> None:
+        display_name = self._roster.pop(participant_id, None)
+        if display_name is not None:
+            await self._set_speaking(participant_id, False)
+            await self._broadcaster.publish(
+                self.meeting.meeting_id,
+                ParticipantEvent(
+                    type="participant.left",
+                    participant_id=participant_id,
+                    display_name=display_name,
+                ).model_dump(),
+            )
         session = self._sessions.get(participant_id)
         if session is None:
             return
