@@ -1,0 +1,113 @@
+# Mosaïque — working agreement
+
+Realtime meeting intelligence, French-first, for French SMBs. A host creates a
+meeting, participants join from their own browsers, each microphone is streamed
+separately, French speech is transcribed live with speaker attribution, and the
+finalized transcript produces a summary, decisions, and action items.
+
+Read `PROJECT_STATE.md` before doing anything. It is the only document that
+describes what actually exists.
+
+---
+
+## Where truth lives
+
+| Document | Authority |
+|---|---|
+| `docs/mosaique-prototype-technical-spec.md` | **Normative.** Contracts, schemas, thresholds, failure matrix. |
+| `docs/mosaique-implementation-blueprint.md` | Reconciles contradictions between source documents; records decisions the spec left open. Wins only where sources conflict. |
+| `docs/IMPLEMENTATION_PLAN.md` | What to build next. Vertical slices, each with an exit gate. |
+| `PROJECT_STATE.md` | **Reality.** What exists, what is verified, what is a guess. |
+| `docs/mosaique-future-media-plane-options.md` | **NON-NORMATIVE.** Future options. Governs nothing. Do not let it change prototype scope. |
+
+When they disagree: reality beats intent, spec beats blueprint, blueprint beats
+the rest.
+
+---
+
+## Non-negotiables
+
+**Use `uv`, never `pip`.** Including in Dockerfiles.
+
+**"Done" requires named test evidence.** `PROJECT_STATE.md` distinguishes
+`IMPLEMENTED` (code merged, nothing proves it) from `VERIFIED` (a named test
+passes, or a number was measured and written down). A passing demo is not
+evidence. Never mark something `VERIFIED` without naming the test.
+
+**Stay inside the slice.** Each slice in the plan lists what is deliberately
+outside it. Building ahead is how the prototype turns into a platform project.
+If something outside the slice looks necessary, say so and stop — do not
+quietly widen scope.
+
+**The seams are enforced by tests, not by convention.**
+`backend/tests/unit/test_architecture.py` parses the source and fails the build
+if anything downstream of the ingress imports FastAPI, Starlette, or
+websockets, or if anything outside `speech/adapters/kyutai/` imports a model
+library. If a change needs those imports to move, the design is wrong, not the
+test.
+
+**Two seams matter most:**
+- `MeetingIngress` (blueprint D-04) — the runtime must not know where audio came from.
+- `StreamingRecognizer` (spec §9.1) — `FakeRecognizer` and Kyutai are interchangeable.
+
+**Timeline rule (ADR-11 / blueprint D-02).** Meeting time is derived from frame
+counts with silence padding, never from client clocks. Silence detection is
+judged in stream time, never wall time — audio arrives faster than real time in
+every replay, and comparing the two fabricates segment breaks. This bug has
+already been found once; do not reintroduce it.
+
+**Only final segments are persisted.** Interim text lives in memory and is
+disposable. Process memory is never the authoritative record.
+
+**Values marked `[measure]` are guesses.** Do not tune them against the fake
+recognizer. They are tuned in Slice 4 against real French audio.
+
+---
+
+## Commands
+
+```bash
+# backend (from backend/)
+uv venv && uv pip install -e ".[dev]"
+uv run alembic upgrade head
+uv run python -m mosaique.app.seed            # prints a host token
+uv run uvicorn mosaique.app.main:create_app --factory --reload --port 8000
+uv run pytest -q                              # 113
+uv run pytest -q -m "not integration"         # 85, no database needed
+uv run ruff check . && uv run ruff format .
+uv run mypy                                   # strict
+uv run python tools/export_openapi.py ../frontend/openapi.json
+
+# frontend (from frontend/)
+npm install && npm run dev
+npm run generate:api                          # regenerate typed client
+npm run typecheck && npm test && npm run build
+npm run test:e2e                              # Playwright, needs a running backend
+```
+
+CI fails if the committed `frontend/openapi.json` differs from what the code
+produces. Regenerate it whenever an API route or schema changes.
+
+---
+
+## Finishing a slice
+
+1. The exit gate in `docs/IMPLEMENTATION_PLAN.md` is green.
+2. `uv run pytest -q`, `ruff`, `mypy`, `npm test`, `npm run build` all pass.
+3. `PROJECT_STATE.md` is updated: statuses moved, evidence named, new
+   assumptions added to §7, measured numbers written into §8, limitations
+   recorded in §10, and a changelog row appended.
+4. Anything you could not verify is stated as unverified. Do not round up.
+
+A slice is not finished until step 3 is done.
+
+---
+
+## Current state (2026-09-06)
+
+Slices 0 and 1 are VERIFIED, browser flow included. 122 tests: 85 backend unit,
+28 backend integration against real PostgreSQL, 8 frontend unit, 1 Playwright
+e2e. Everything in the speech path is a fake — no real audio has ever been
+transcribed by this system.
+
+Next: **Slice 2 — two participants and the replay harness.**
