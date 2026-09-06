@@ -90,8 +90,11 @@ npm run test:e2e                              # Playwright, needs a running back
                                               # MOSAIQUE_CHROMIUM_PATH overrides the browser
 ```
 
-CI fails if the committed `frontend/openapi.json` differs from what the code
-produces. Regenerate it whenever an API route or schema changes.
+Regenerate `frontend/openapi.json` whenever an API route or schema changes: a
+stale document means the generated client silently disagrees with the server.
+This was meant to be enforced by a CI drift job, but **there is no CI in this
+repository** — no `.github/` directory exists (L-18) — so the check is yours to
+run before you push.
 
 ---
 

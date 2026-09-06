@@ -106,9 +106,10 @@ from frame counts (ADR-11), never against a wall clock. That equivalence is
 asserted by `test_ten_times_speed_produces_the_same_transcript_as_real_time`,
 and it is the property the harness lives or dies by.
 
-Regenerating the OpenAPI document is not optional: CI fails if the committed
-`frontend/openapi.json` differs from what the code produces, because a stale
-document means the typed client silently disagrees with the server.
+Regenerating the OpenAPI document is not optional: a stale
+`frontend/openapi.json` means the typed client silently disagrees with the
+server. This was meant to be a CI drift job, but there is no CI in this
+repository (`PROJECT_STATE.md` L-18), so run it yourself before pushing.
 
 ## Layout
 
