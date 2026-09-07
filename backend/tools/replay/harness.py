@@ -176,9 +176,14 @@ class ReplayHarness:
         The wait is wall time and is not divided by the speed factor; see
         `scenario` for why that is the only choice that survives a 10x replay.
         """
+        # Build the audio before opening the socket. Generating it afterwards
+        # holds an open, silent connection for as long as it takes, and the
+        # server is right to hang up on a client that says nothing for 30 s
+        # (tech spec 7.4).
+        audio = script.audio(self._scenario.base_dir)
         if script.start_ms:
             await asyncio.sleep(script.start_ms / 1000.0)
-        stream = await self._open_stream(stack, meeting_id, script, join)
+        stream = await self._open_stream(stack, meeting_id, script, join, audio)
         self._watch(stream)
         await self._send(stream)
         return stream
@@ -213,6 +218,7 @@ class ReplayHarness:
         meeting_id: str,
         script: ParticipantScript,
         join: dict[str, Any],
+        audio: bytes,
     ) -> _Stream:
         socket = await stack.enter_async_context(
             connect(f"{self._ws_base}/ws/meetings/{meeting_id}", max_size=None)
@@ -223,7 +229,7 @@ class ReplayHarness:
             participant_id=join["participant"]["id"],
             session_token=join["session_token"],
             socket=socket,
-            audio=script.audio(self._scenario.base_dir),
+            audio=audio,
             meeting_id=meeting_id,
         )
         # Roster messages for participants already in the room can beat
