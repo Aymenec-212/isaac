@@ -93,3 +93,54 @@ async def test_pausing_is_recorded_and_a_frame_unpauses(ws_client, settings, ten
         await ws.send_json({"v": 1, "type": "audio.resume"})
         await asyncio.sleep(0.15)
         assert runtime._sessions[participant_id].paused is False
+
+
+async def join_two(http, settings, tenant):
+    """Create a meeting and join two participants, keeping the invite token."""
+    from tests.conftest import host_token_for
+
+    token = host_token_for(settings, tenant)
+    created = await http.post("/meetings", json={"title": "Panne"}, headers=auth(token))
+    body = created.json()
+    meeting_id = body["meeting"]["id"]
+    invite = body["invite_url"].split("t=")[1]
+    people = []
+    for name in ("Amina", "Témoin"):
+        joined = await http.post(
+            f"/meetings/{meeting_id}/join",
+            json={"display_name": name, "invite_token": invite},
+        )
+        assert joined.status_code == 200
+        people.append(joined.json())
+    return token, meeting_id, people
+
+
+async def test_someone_who_goes_idle_then_disconnects_still_leaves_the_panel(
+    ws_client, settings, tenants, monkeypatch
+):
+    """An idle-closed stream has nothing to hold open, so the grace is skipped.
+
+    Without this they would sit in the participant panel forever, present and
+    silent, because the departure path used to give up when it found no stream.
+    """
+    monkeypatch.setattr(meeting_module, "IDLE_CLOSE_S", 0.2)
+    monkeypatch.setattr(meeting_module, "IDLE_SWEEP_S", 0.05)
+
+    _, meeting_id, (speaker, watcher_join) = await join_two(
+        ws_client.http, settings, tenants["alpha"]
+    )
+
+    async with ws_client.websocket_connect(f"/ws/meetings/{meeting_id}") as watcher:
+        await hello(watcher, watcher_join["session_token"])
+
+        async with ws_client.websocket_connect(f"/ws/meetings/{meeting_id}") as ws:
+            await hello(ws, speaker["session_token"])
+            await stream(ws, start=0, count=30)
+            await asyncio.sleep(0.5)  # long enough for the idle close
+
+        await asyncio.sleep(0.3)
+        events = [m for m in watcher.drain() if m["type"] == "participant.left"]
+
+    assert any(m["participant_id"] == speaker["participant"]["id"] for m in events), (
+        "the idle participant never left the roster"
+    )

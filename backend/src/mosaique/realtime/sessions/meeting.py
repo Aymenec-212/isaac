@@ -725,8 +725,14 @@ class MeetingRuntime:
         grace expires is the segment finalized and the participant announced as
         gone.
         """
+        if participant_id in self._grace:
+            return
         session = self._sessions.get(participant_id)
-        if session is None or participant_id in self._grace:
+        if session is None:
+            # Their stream was already closed — an idle close, most likely — so
+            # there is nothing to hold open and no reason to wait. Without this
+            # they would sit in the panel forever, present and silent.
+            await self._announce_departure(participant_id)
             return
         session.disconnected()
         await self._set_speaking(participant_id, False)
@@ -759,17 +765,22 @@ class MeetingRuntime:
             await asyncio.wait({pump}, timeout=5.0)
         await self._finalize_session(session)
 
-        display_name = self._roster.pop(participant_id, None)
-        if display_name is not None:
-            await self._broadcaster.publish(
-                self.meeting.meeting_id,
-                ParticipantEvent(
-                    type="participant.left",
-                    participant_id=participant_id,
-                    display_name=display_name,
-                ).model_dump(),
-            )
+        await self._announce_departure(participant_id)
         log.info("participant_stream_expired", participant_id=participant_id)
+
+    async def _announce_departure(self, participant_id: str) -> None:
+        display_name = self._roster.pop(participant_id, None)
+        if display_name is None:
+            return
+        await self._set_speaking(participant_id, False)
+        await self._broadcaster.publish(
+            self.meeting.meeting_id,
+            ParticipantEvent(
+                type="participant.left",
+                participant_id=participant_id,
+                display_name=display_name,
+            ).model_dump(),
+        )
 
     async def _finalize_session(self, session: ParticipantSession) -> None:
         """Close one stream's ASR session, open segment, audio file and row."""
