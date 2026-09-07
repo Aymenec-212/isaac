@@ -7,6 +7,7 @@ timeline arithmetic, and the segmenter for this participant's stream.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 
 from mosaique.speech.interfaces import (
@@ -61,6 +62,9 @@ class ParticipantSession:
         # reconnect grace (tech spec 7.4), so "connected" is a property of this
         # session rather than of whether a socket object exists.
         self.connected = True
+        # Muted on purpose, rather than silent by accident (blueprint R-1).
+        self.paused = False
+        self._last_frame_at = time.monotonic()
         self.frames_received = 0
         self.frames_missing = 0
         self.frames_dropped = 0
@@ -97,6 +101,7 @@ class ParticipantSession:
             self.frames_missing += seq - self._last_seq - 1
         self._last_seq = seq
         self.frames_received += 1
+        self._last_frame_at = time.monotonic()
 
         try:
             self._queue.put_nowait(QueuedFrame(seq=seq, pcm=pcm, received_at_ms=received_at_ms))
@@ -115,6 +120,16 @@ class ParticipantSession:
         buffer cannot smuggle duplicates past the check by reconnecting.
         """
         return -1 if self._last_seq is None else self._last_seq
+
+    def idle_for_s(self) -> float:
+        """Wall seconds since the last accepted frame.
+
+        Wall time is right here and only here: this measures how long real
+        silence has lasted, which is a question about the world rather than
+        about the stream. Nothing derived from it reaches the timeline —
+        segment boundaries stay frame-derived (ADR-11).
+        """
+        return time.monotonic() - self._last_frame_at
 
     def disconnected(self) -> None:
         self.connected = False

@@ -14,6 +14,7 @@ import time
 from collections.abc import Sequence
 from typing import BinaryIO
 
+from mosaique.domain.ids import new_id
 from mosaique.observability.logging import get_logger
 from mosaique.observability.metrics import METRICS
 from mosaique.persistence.engine import session_scope
@@ -28,6 +29,7 @@ from mosaique.realtime.ingress import (
     IngressEvent,
     MeetingIngress,
     MeetingRef,
+    ParticipantAudioState,
     ParticipantJoined,
     ParticipantLeft,
     ResumeInfo,
@@ -67,6 +69,15 @@ DRAIN_DEADLINE_S = 20.0
 # that reconnects inside the window continues its segment rather than splitting
 # it. [measure]
 RECONNECT_GRACE_S = 30.0
+
+# Blueprint D-02: audio silent for this long closes the AudioSession, whether
+# the participant muted or their network stalled. Resuming opens a new one with
+# a fresh server anchor, which bounds silence padding at ~1.4 MB per pause
+# instead of writing minutes of zeroes. [measure]
+IDLE_CLOSE_S = 30.0
+
+# How often the runtime looks for streams that have gone quiet.
+IDLE_SWEEP_S = 1.0
 
 # How long the reader waits for the next recognizer event before checking for
 # silence. Short enough to keep segment closing responsive, long enough that a
@@ -111,6 +122,7 @@ class MeetingRuntime:
         self._first_word_seen: set[str] = set()
         self._frame_arrival_ms: dict[str, int] = {}
         self._consumer: asyncio.Task[None] | None = None
+        self._idle_sweep: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
 
     # ---- lifecycle -------------------------------------------------------
@@ -118,6 +130,56 @@ class MeetingRuntime:
     async def start(self) -> None:
         await self._ingress.start(self.meeting)
         self._consumer = asyncio.create_task(self._consume())
+        self._idle_sweep = asyncio.create_task(self._sweep_idle())
+
+    async def _sweep_idle(self) -> None:
+        """Close AudioSessions that have gone quiet (blueprint D-02).
+
+        A mute and a network stall look the same from here, and D-02 wants the
+        same answer for both: past `IDLE_CLOSE_S`, stop the session rather than
+        pad silence into it indefinitely. The participant stays; their next
+        frame opens a new AudioSession with a fresh anchor.
+        """
+        try:
+            while True:
+                await asyncio.sleep(IDLE_SWEEP_S)
+                for participant_id in list(self._sessions):
+                    session = self._sessions.get(participant_id)
+                    if session is None or session.closed:
+                        continue
+                    if session.idle_for_s() < IDLE_CLOSE_S:
+                        continue
+                    await self._close_idle_stream(participant_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.error("idle_sweep_failed", error_type=type(exc).__name__)
+
+    async def _close_idle_stream(self, participant_id: str) -> None:
+        session = self._sessions.pop(participant_id, None)
+        if session is None:
+            return
+        await session.stop()
+        pump = self._pumps.pop(participant_id, None)
+        if pump is not None:
+            await asyncio.wait({pump}, timeout=5.0)
+        await self._finalize_session(session)
+        await self._set_speaking(participant_id, False)
+        log.info(
+            "audio_session_closed_idle",
+            participant_id=participant_id,
+            audio_session_id=session.audio_session_id,
+        )
+
+    async def _set_paused(self, participant_id: str, paused: bool) -> None:
+        """Mute is a statement about intent, not a fault (blueprint R-1)."""
+        session = self._sessions.get(participant_id)
+        if session is None:
+            return
+        session.paused = paused
+        if paused:
+            await self._set_speaking(participant_id, False)
+        log.info("participant_audio_state", participant_id=participant_id, paused=paused)
 
     async def _consume(self) -> None:
         try:
@@ -134,9 +196,11 @@ class MeetingRuntime:
         if isinstance(event, ParticipantJoined):
             await self._open_participant(event)
         elif isinstance(event, IngressAudioFrame):
-            self._on_frame(event)
+            await self._on_frame(event)
         elif isinstance(event, ParticipantLeft):
             await self._close_participant(event.participant_id)
+        elif isinstance(event, ParticipantAudioState):
+            await self._set_paused(event.participant_id, event.paused)
         elif isinstance(event, IngressError):
             log.warning("ingress_error", code=event.code, participant_id=event.participant_id)
 
@@ -158,21 +222,31 @@ class MeetingRuntime:
         if event.participant_id in self._sessions:
             await self._resume_participant(event)
             return
+        await self._open_stream(event.participant_id, event.audio_session_id)
+        await self._announce(event)
 
+    async def _open_stream(self, participant_id: str, audio_session_id: str) -> None:
+        """Start one AudioSession for a participant.
+
+        Called on join, and again after an idle close (D-02) when the person
+        starts speaking after a long mute. The segmenter's first sequence comes
+        from the database, so a second AudioSession continues the participant's
+        numbering rather than restarting it.
+        """
         # ADR-11: the anchor is server receive time relative to meeting start.
         epoch_ms = max(0, _now_ms() - self._started_at_ms)
 
         async with session_scope() as db:
             first_sequence = await SegmentRepository(
                 db, self.meeting.organization_id
-            ).next_sequence(event.participant_id)
+            ).next_sequence(participant_id)
             await AudioSessionRepository(db, self.meeting.organization_id).create(
-                audio_session_id=event.audio_session_id,
+                audio_session_id=audio_session_id,
                 meeting_id=self.meeting.meeting_id,
-                participant_id=event.participant_id,
+                participant_id=participant_id,
                 epoch_ms=epoch_ms,
                 audio_object_key=self._audio_store.object_key(
-                    self.meeting.meeting_id, event.audio_session_id
+                    self.meeting.meeting_id, audio_session_id
                 ),
             )
 
@@ -181,26 +255,26 @@ class MeetingRuntime:
                 language="fr",
                 correlation={
                     "meeting_id": self.meeting.meeting_id,
-                    "participant_id": event.participant_id,
+                    "participant_id": participant_id,
                 },
             )
         )
         session = ParticipantSession(
-            participant_id=event.participant_id,
-            audio_session_id=event.audio_session_id,
+            participant_id=participant_id,
+            audio_session_id=audio_session_id,
             asr_session=asr,
             segmenter=Segmenter(first_sequence=first_sequence),
             epoch_ms=epoch_ms,
         )
-        self._sessions[event.participant_id] = session
-        self._files[event.participant_id] = self._audio_store.open_session(
-            self.meeting.meeting_id, event.audio_session_id
+        self._sessions[participant_id] = session
+        self._files[participant_id] = self._audio_store.open_session(
+            self.meeting.meeting_id, audio_session_id
         )
-        self._pumps[event.participant_id] = asyncio.create_task(self._pump(session))
-        await self._announce(event)
+        self._pumps[participant_id] = asyncio.create_task(self._pump(session))
         log.info(
             "participant_stream_opened",
-            participant_id=event.participant_id,
+            participant_id=participant_id,
+            audio_session_id=audio_session_id,
             epoch_ms=epoch_ms,
         )
 
@@ -259,10 +333,22 @@ class MeetingRuntime:
             ).model_dump(),
         )
 
-    def _on_frame(self, frame: IngressAudioFrame) -> None:
+    async def _on_frame(self, frame: IngressAudioFrame) -> None:
         session = self._sessions.get(frame.participant_id)
         if session is None:
-            return
+            # Audio after an idle close: the person is still in the meeting,
+            # they just stopped talking for a while (D-02). Open a new
+            # AudioSession with a fresh anchor rather than dropping the frame.
+            # The id is minted here, not taken from the frame, because the
+            # socket's id already belongs to the AudioSession we closed.
+            if frame.participant_id not in self._roster:
+                return
+            await self._open_stream(frame.participant_id, new_id())
+            session = self._sessions[frame.participant_id]
+            log.info("audio_session_reopened", participant_id=frame.participant_id)
+        if session.paused:
+            # A frame is the clearest possible statement that they are back.
+            session.paused = False
         self._frame_arrival_ms.setdefault(frame.participant_id, _now_ms())
         session.accept(frame.seq, frame.pcm, _now_ms())
 
@@ -432,6 +518,8 @@ class MeetingRuntime:
         `flush()` is the D-05 accelerated catch-up rather than a wait, which is
         what keeps this deadline generous instead of tight.
         """
+        if self._idle_sweep is not None:
+            self._idle_sweep.cancel()
         for task in self._grace.values():
             task.cancel()
         self._grace.clear()
@@ -541,6 +629,8 @@ class MeetingRuntime:
             handle.close()
 
     async def stop(self) -> None:
+        if self._idle_sweep is not None:
+            self._idle_sweep.cancel()
         for task in self._grace.values():
             task.cancel()
         self._grace.clear()

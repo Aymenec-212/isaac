@@ -24,7 +24,12 @@ from mosaique.observability.metrics import METRICS
 from mosaique.persistence.engine import session_scope
 from mosaique.persistence.repositories.meetings import MeetingRepository
 from mosaique.persistence.repositories.transcript import ParticipantRepository
-from mosaique.realtime.ingress import MeetingRef, ParticipantJoined, ParticipantLeft
+from mosaique.realtime.ingress import (
+    MeetingRef,
+    ParticipantAudioState,
+    ParticipantJoined,
+    ParticipantLeft,
+)
 from mosaique.realtime.ingress.interfaces import IngressAudioFrame
 from mosaique.realtime.protocol.frames import FrameRejection, InvalidFrame, decode_frame
 from mosaique.realtime.protocol.messages import ErrorMessage, Hello, HelloOk, Ping, Pong
@@ -240,6 +245,16 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                     await websocket.send_json(Pong(t=payload.get("t", _now_ms())).model_dump())
                 elif kind == "pong":
                     pass  # `liveness.seen()` above already recorded it
+                elif kind in ("audio.pause", "audio.resume"):
+                    # Tech spec 7.1: the session stays, the server just stops
+                    # expecting frames. Without this a mute is indistinguishable
+                    # from a stalled network and the status bar cries wolf.
+                    ingress.submit(
+                        ParticipantAudioState(
+                            participant_id=participant_id,
+                            paused=kind == "audio.pause",
+                        )
+                    )
 
     except WebSocketDisconnect:
         pass

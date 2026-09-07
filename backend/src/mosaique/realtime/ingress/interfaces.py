@@ -48,13 +48,29 @@ class IngressAudioFrame:
 
 
 @dataclass(frozen=True)
+class ParticipantAudioState:
+    """The participant muted or unmuted (tech spec 7.1, blueprint R-1).
+
+    Transport-neutral on purpose: the runtime learns that this person's audio
+    is intentionally absent, not that a particular button was pressed. Without
+    it a mute is indistinguishable from a network stall, and the status bar
+    would cry wolf at someone who simply muted themselves.
+    """
+
+    participant_id: str
+    paused: bool
+
+
+@dataclass(frozen=True)
 class IngressError:
     participant_id: str | None
     code: str
     message: str
 
 
-IngressEvent = ParticipantJoined | ParticipantLeft | IngressAudioFrame | IngressError
+IngressEvent = (
+    ParticipantJoined | ParticipantLeft | ParticipantAudioState | IngressAudioFrame | IngressError
+)
 
 
 @dataclass(frozen=True)
