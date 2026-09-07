@@ -230,7 +230,7 @@ Mirrors blueprint §5. Status here is the live one.
 | A-6 | LLM returns valid `evidence_segment_ids` | Evidence linking softens | Slice 5 | UNVALIDATED |
 | A-7 | Worklet resampling is cheap on mid-range laptops | Resample server-side | Slice 1 | UNVALIDATED — the e2e runs the worklet but measures no CPU cost |
 | A-8 | 12.5 frames/s per participant survives real networks | Batch or enlarge frames | Slice 2 | **UNVALIDATED — the one Slice 2 exit-gate item still open.** Every run so far is loopback on one machine. `tools/replay --base-url` against a second machine is the test; it has not been run |
-| A-9 | 30 s ASR grace does not leak GPU memory | Shorten grace | Slice 3 | **PARTIAL** — `tests/realtime/test_long_run.py` shows no unbounded growth over an accelerated hour on the *fake* recognizer. There is no GPU in the path yet, so the GPU half of this assumption is still open until Slice 4 |
+| A-9 | 30 s ASR grace does not leak GPU memory | Shorten grace | Slice 3 | **PARTIAL** — `test_an_hour_of_meeting_does_not_grow_the_runtime` measures 0.0 MB of tracked growth across an accelerated hour on the *fake* recognizer. There is no GPU in the path yet, so the GPU half is still open until Slice 4 |
 | A-10 | French WER is good enough to be useful | Model swap | Slice 4 | UNVALIDATED |
 | A-11 | "Joining is consent" satisfies FR/EU law | Consent flow and DPA change | legal counsel | **UNVALIDATED — not an engineering question** |
 | A-13 | A participant's place on the meeting timeline may be anchored to the server clock at connect | A replay cannot reproduce a staggered join; joins would need to be frame-derived too | Slice 2 | **CONFIRMED as a property, not a guess** — see L-15. Segmentation is frame-derived and speed-invariant; the join anchor is not |
@@ -260,7 +260,8 @@ Every `[measure]` placeholder in the technical specification. A value here means
 | First-word latency p95, 1x, 2 participants | 915 ms | replay report, 2026-09-06 | MEASURED — **fake recognizer over loopback**. Dominated by the fake's 500 ms scripted model delay. Not the NFR and not a prediction of it |
 | Pipeline turnaround p95 (frame out → interim text back), 1x | 962 ms | same report | MEASURED, same caveat |
 | Pipeline turnaround p95 at 10x | 98 ms | same report | MEASURED. Lower because the fake's model delay is stream time, which compresses |
-| Accelerated hour, 2 participants at `--speed 60` | ~18 min wall for 60 min of stream (~3.3x realised) | `tests/realtime/test_long_run.py`, 2026-09-07 | MEASURED. The ceiling is harness pacing and loopback, not the runtime — the same limit §8 already records for 10x. Budget ~20 min when running `-m slow` |
+| Accelerated hour, 2 participants at `--speed 60` | 65.7 s wall for 3 600 s of stream — **54.8x realised** | `tests/realtime/test_long_run.py`, 2026-09-07 | MEASURED. The earlier ~3.3x figure was the harness generating its own audio, not the runtime |
+| Tracked memory growth over an accelerated hour | **0.0 MB** | same run, `tracemalloc` around the whole replay | MEASURED on the **fake** recognizer. Nothing in the realtime path grows with meeting length; A-9's GPU half is still open until Slice 4 |
 | Frames dropped, 2 participants at 10x | 0 of 250 per stream | `audio_sessions.frames_dropped` after a CLI replay, 2026-09-06 | MEASURED on loopback. A-8 is about real networks and is still open |
 | Segment-close latency with vs. without flush trick | unknown | — | UNMEASURED |
 | French WER on real meeting audio | unknown | — | UNMEASURED |
@@ -279,7 +280,7 @@ Every `[measure]` placeholder in the technical specification. A value here means
 | `e2e/meeting.spec.ts` | full single-participant browser flow with a fake microphone | **1 passing** (L-12 closed); confirmed on the maintainer's machine 2026-09-07 |
 | `e2e/two-participants.spec.ts` | two browsers, merged attributed transcript, roster, speaking indicator | **1 passing**; confirmed on the maintainer's machine 2026-09-07 |
 | `tests/realtime/` | reconnect and resume (4), transport health (2), idle and pause (2), gap markers (2), degraded persistence (3), graceful shutdown (2), failure matrix through the harness (3) | **18 passing** |
-| `tests/realtime/test_long_run.py` | an accelerated hour, for memory stability (A-9) | **deselected by default** — `uv run pytest -m slow` |
+| `tests/realtime/test_long_run.py` | an accelerated hour, for memory stability (A-9) | **1 passing** in ~70 s; deselected by default — `uv run pytest -m slow` |
 | smoke (real model) | WER + latency on French fixture | NOT WRITTEN — Slice 4 |
 | cross-network run (A-8) | two physical machines, one meeting | **NOT RUN** — needs a second machine. `tools/replay --base-url` is the harness for it |
 | Spike A | cross-talk with a speakerphone | **NOT RUN** — needs two laptops and real microphones |
@@ -308,7 +309,7 @@ Current, as of planning. Each is a deliberate choice, not an oversight.
 | L-14 | A gap wider than 30 s is capped rather than padded | Padding minutes of silence is worse; Slice 3 closes the AudioSession instead | Slice 3 |
 | L-15 | A replay reproduces segmentation exactly at any speed, but **not** a staggered join | ADR-11 anchors `epoch_ms` to the server clock when a stream opens, so only frame-derived time is speed-invariant. The harness works with this rather than against it: a scenario's `start_ms` is a wall-clock delay that is deliberately *not* divided by the speed factor, which makes the anchor identical at 1x and 10x | Never, unless the anchor stops being clock-derived |
 | L-16 | A guest cannot read the transcript once the meeting ends | The review page needs a host token (L-11). Both browsers agree while the meeting is live, which is what Slice 2 claims; a guest then lands on the token gate | Slice 7 guest links (Q4) |
-| L-23 | The accelerated-hour test does not pass yet | Two harness bugs were found and fixed by it — not answering server pings, then starving its own reader at high speed factors — and then a real runtime bug: concurrent pumps sharing one persistence buffer could drop a broadcast segment. The hour has not been re-run to completion since that fix, so `-m slow` is **unproven**, not passing | Re-run `uv run pytest -m slow`; budget ~20 min |
+| L-23 | ~~The accelerated-hour test does not pass~~ **CLOSED 2026-09-07** | It now passes in ~70 s. Getting there took four causes, three of them the harness's own: it never answered server pings; its send loop starved the reader that would have; and it built an hour of synthetic audio with a per-sample loop *after* opening the socket, so the server saw a client that connected and went silent for 30 s. The fourth was real: concurrent pumps sharing one persistence buffer could drop a segment that had already been broadcast | — |
 | L-22 | `test_replayed_frames_do_not_duplicate_the_transcript` failed once in a full-suite run, and has not been reproduced | The server closed the harness's opening handshake with 1008, which means it could not find the meeting or the participant row. Two harness-driven modules share one database and each test truncates it, so a teardown overlapping a setup is the obvious suspect — but it survived four targeted re-runs and three subsequent full runs, so the mechanism is **not established**. The handshake now names itself when this happens instead of raising a bare `ConnectionClosedError` | Next time it fires. If it becomes frequent, give the harness modules separate databases rather than sharing one |
 | L-19 | The spec has the server pinging (§7.4) but lists only `pong` coming back (§7.2) | Both directions are needed — a suspended tab stops sending without closing — so one message shape serves both and `ping` travels each way. Recorded rather than silently diverging | If §7.2 is ever revised, this is the paragraph to update |
 | L-20 | A gap segment is a real row with empty text and its own status | The alternative was an omission, which is indistinguishable from "nobody spoke". Downstream consumers must therefore skip `status='gap'` when concatenating transcript text — the Slice 5 prompt builder is the next one that will care | Slice 5 |
@@ -396,7 +397,7 @@ written against), blueprint D-02 (idle close), R-1 (`audio.pause`), X-13
 * Sustained overload is proven at the policy level, not by actually saturating
   a real queue through the gateway — forcing that through a socket tests the
   event loop more than the rule.
-* A-9's GPU half stays open: the accelerated hour shows no unbounded growth,
+* A-9's GPU half stays open: the accelerated hour measures 0.0 MB of growth,
   but there is no GPU in the path until Slice 4.
 
 ### The two things most likely to bite

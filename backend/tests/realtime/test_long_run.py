@@ -62,6 +62,12 @@ async def test_an_hour_of_meeting_does_not_grow_the_runtime(live_server, setting
     growth = sum(stat.size_diff for stat in after.compare_to(before, "filename"))
     tracemalloc.stop()
 
+    print(
+        f"\naccelerated hour: {report.stream_seconds:.0f} s of stream in "
+        f"{report.wall_seconds:.1f} s wall ({report.totals['speedup']}x realised); "
+        f"tracked memory grew {growth / 1024 / 1024:.1f} MB"
+    )
+
     assert report.segments, "an hour of audio produced no transcript at all"
     assert report.stream_seconds >= 3_500, "the scenario did not actually run an hour"
     # The harness itself holds every message it received, so some growth is
