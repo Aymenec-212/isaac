@@ -54,7 +54,7 @@ IN PROGRESS. Everything from Slice 4 onward is still `SPECIFIED`.**
 | Runnable | yes — `docker compose up`, or uv + local PostgreSQL |
 | Deployed | no |
 | Real audio ever transcribed by this system | **no — every model in the path is a fake** |
-| Tests passing | **137**: 85 backend unit, 32 backend integration (real PostgreSQL), 18 frontend unit, 2 Playwright browser specs |
+| Tests passing | **180**: 103 backend unit, 48 backend integration and realtime (real PostgreSQL), 27 frontend unit, 2 Playwright browser specs. Plus one opt-in accelerated hour behind `-m slow` |
 | Lint / types | ruff clean; mypy strict clean on 73 source files (the harness included); `tsc --noEmit` clean |
 | Known gap | A-8 unvalidated: every run so far is loopback on one machine. Spike A not run. **No CI runs on this repository** — see L-18. |
 | Next action | Slice 3 — failure behavior (in progress; see §12) |
@@ -272,10 +272,10 @@ Every `[measure]` placeholder in the technical specification. A value here means
 
 | Suite | Covers | Status |
 |---|---|---|
-| `tests/unit/` | state machine, config, authorization, segmenter, frame codec, participant session, output schema, **architecture boundaries** | **85 passing** |
+| `tests/unit/` | state machine, config, authorization, segmenter, frame codec, participant session, output schema, **architecture boundaries**, overload policy, stream status | **103 passing** |
 | `tests/integration/` | create/read/list, tenancy, durability, join, live transcript, end idempotency, job retry, failure isolation, startup recovery | **28 passing** |
 | `tests/integration/test_replay.py` | two streams merged and attributed; 1x ≡ 10x; roster and speaking; report shape | **4 passing** — runs a real app-server subprocess and drives it over real WebSockets |
-| `frontend src/**/*.test.ts` | transcript reconciler (11), participant roster (7) | **18 passing** (vitest) |
+| `frontend src/**/*.test.ts` | transcript reconciler (11), participant roster (7), reconnect frame buffer (4), silence watcher (5) | **27 passing** (vitest) |
 | `e2e/meeting.spec.ts` | full single-participant browser flow with a fake microphone | **1 passing** (L-12 closed); confirmed on the maintainer's machine 2026-09-07 |
 | `e2e/two-participants.spec.ts` | two browsers, merged attributed transcript, roster, speaking indicator | **1 passing**; confirmed on the maintainer's machine 2026-09-07 |
 | `tests/realtime/` | reconnect and resume (4), transport health (2), idle and pause (2), gap markers (2), degraded persistence (3), graceful shutdown (2), failure matrix through the harness (3) | **18 passing** |
