@@ -120,9 +120,15 @@ class SegmentRepository:
         text: str,
         words: list[WordTiming] | None,
         status: str = "final",
+        segment_id: str | None = None,
     ) -> str:
-        """Insert one final segment. A retried write is a no-op (tech spec 10)."""
-        segment_id = new_id()
+        """Insert one final segment. A retried write is a no-op (tech spec 10).
+
+        The caller may supply the id. That matters when the database is
+        unavailable: the segment is broadcast to clients immediately and
+        written later, and both have to name it the same thing.
+        """
+        segment_id = segment_id or new_id()
         stmt = (
             pg_insert(TranscriptSegment)
             .values(

@@ -17,10 +17,16 @@ from pathlib import Path
 
 from mosaique.speech.interfaces import FRAME_PAYLOAD_BYTES, SAMPLE_RATE_HZ
 
+# Synthetic audio is built one block at a time and repeated. A per-sample
+# Python loop costs about 0.6 s per minute of audio, so an hour would be a
+# minute of blocked event loop — and the harness generates its audio while a
+# socket is already open, which is how a long replay used to look like a dead
+# client to the server. Tiling makes an hour as cheap as five seconds.
+_SYNTH_BLOCK_MS = 5_000
 
-def synthetic_pcm(duration_ms: int, *, seed: int = 1) -> bytes:
-    """Deterministic speech-shaped tone. Same seed, same bytes, every run."""
-    samples = duration_ms * SAMPLE_RATE_HZ // 1000
+
+def _synthetic_block(seed: int) -> bytes:
+    samples = _SYNTH_BLOCK_MS * SAMPLE_RATE_HZ // 1000
     fundamental = 110.0 + 37.0 * (seed % 8)
     buffer = array("h", bytes(samples * 2))
     for i in range(samples):
@@ -33,6 +39,21 @@ def synthetic_pcm(duration_ms: int, *, seed: int = 1) -> bytes:
         ) * (0.55 + 0.45 * math.sin(2 * math.pi * 0.7 * t))
         buffer[i] = int(max(-1.0, min(1.0, value)) * 12000)
     return buffer.tobytes()
+
+
+def synthetic_pcm(duration_ms: int, *, seed: int = 1) -> bytes:
+    """Deterministic speech-shaped tone. Same seed, same bytes, every run.
+
+    The block repeats every five seconds, which is audible but irrelevant:
+    `FakeRecognizer` reads a script and never listens to the samples. Slice 4
+    points scenarios at real recordings, where this function is not used.
+    """
+    wanted = duration_ms * SAMPLE_RATE_HZ // 1000 * 2
+    block = _synthetic_block(seed)
+    if wanted <= len(block):
+        return block[:wanted]
+    repeats = -(-wanted // len(block))
+    return (block * repeats)[:wanted]
 
 
 def load_pcm(path: Path) -> bytes:

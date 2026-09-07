@@ -22,6 +22,7 @@ from tools.replay.fixtures import iter_frames
 from tools.replay.report import ParticipantRecord, ReplayReport, SegmentRecord
 from tools.replay.scenario import ParticipantScript, Scenario
 from websockets.asyncio.client import ClientConnection, connect
+from websockets.exceptions import ConnectionClosed
 
 from mosaique.realtime.protocol.frames import encode_frame
 from mosaique.speech.interfaces import FRAME_DURATION_MS
@@ -51,6 +52,16 @@ class _Stream:
     hello_ok_at: float = 0.0
     meeting_started_at: float = 0.0
     hydrated: list[tuple[str, int, str]] = field(default_factory=list)
+    meeting_id: str = ""
+    online: bool = True
+    resumed: bool = False
+    disconnects: int = 0
+    duplicates_sent: int = 0
+    reader: asyncio.Task[None] | None = None
+
+    @property
+    def last_ack(self) -> int | None:
+        return len(self.frame_sent_at) - 1 if self.frame_sent_at else None
 
     def finals(self) -> dict[tuple[str, int], str]:
         return {
@@ -108,6 +119,10 @@ class ReplayHarness:
         if self._speed <= 0:
             raise ValueError("speed must be positive")
         self._quiet_ms = quiet_ms
+        self._stack = contextlib.AsyncExitStack()
+        # Every reader task ever started, including the ones a reconnect
+        # creates, so teardown can cancel all of them.
+        self._readers: list[asyncio.Task[None]] = []
         self._max_settle_s = max_settle_s
         self._last_message_at = 0.0
 
@@ -126,13 +141,13 @@ class ReplayHarness:
                 for p in self._scenario.participants
             ]
 
-            readers: list[asyncio.Task[None]] = []
             async with contextlib.AsyncExitStack() as stack:
+                self._stack = stack
                 started = time.monotonic()
                 try:
                     streams = await asyncio.gather(
                         *(
-                            self._participate(stack, meeting_id, script, join, readers)
+                            self._participate(stack, meeting_id, script, join)
                             for script, join in joins
                         )
                     )
@@ -143,9 +158,9 @@ class ReplayHarness:
                     for stream in streams:
                         await self._hydrate(http, meeting_id, stream)
                 finally:
-                    for reader in readers:
+                    for reader in self._readers:
                         reader.cancel()
-                    await asyncio.gather(*readers, return_exceptions=True)
+                    await asyncio.gather(*self._readers, return_exceptions=True)
 
         return self._build_report(meeting_id, list(streams), wall_seconds)
 
@@ -155,17 +170,21 @@ class ReplayHarness:
         meeting_id: str,
         script: ParticipantScript,
         join: dict[str, Any],
-        readers: list[asyncio.Task[None]],
     ) -> _Stream:
         """One participant's whole life: wait, connect, stream.
 
         The wait is wall time and is not divided by the speed factor; see
         `scenario` for why that is the only choice that survives a 10x replay.
         """
+        # Build the audio before opening the socket. Generating it afterwards
+        # holds an open, silent connection for as long as it takes, and the
+        # server is right to hang up on a client that says nothing for 30 s
+        # (tech spec 7.4).
+        audio = script.audio(self._scenario.base_dir)
         if script.start_ms:
             await asyncio.sleep(script.start_ms / 1000.0)
-        stream = await self._open_stream(stack, meeting_id, script, join)
-        readers.append(asyncio.create_task(self._read(stream)))
+        stream = await self._open_stream(stack, meeting_id, script, join, audio)
+        self._watch(stream)
         await self._send(stream)
         return stream
 
@@ -199,32 +218,31 @@ class ReplayHarness:
         meeting_id: str,
         script: ParticipantScript,
         join: dict[str, Any],
+        audio: bytes,
     ) -> _Stream:
         socket = await stack.enter_async_context(
             connect(f"{self._ws_base}/ws/meetings/{meeting_id}", max_size=None)
         )
-        await socket.send(
-            json.dumps(
-                {
-                    "v": 1,
-                    "type": "hello",
-                    "session_token": join["session_token"],
-                    "last_ack_sequence": None,
-                    "client": {"ua": "replay-harness", "sample_rate": 24000},
-                }
-            )
-        )
+        await socket.send(json.dumps(self._hello(join["session_token"], None)))
         stream = _Stream(
             script=script,
             participant_id=join["participant"]["id"],
             session_token=join["session_token"],
             socket=socket,
-            audio=script.audio(self._scenario.base_dir),
+            audio=audio,
+            meeting_id=meeting_id,
         )
         # Roster messages for participants already in the room can beat
         # `hello.ok` onto the wire; keep them rather than dropping them.
         while True:
-            message = json.loads(await asyncio.wait_for(socket.recv(), timeout=15))
+            try:
+                message = json.loads(await asyncio.wait_for(socket.recv(), timeout=15))
+            except ConnectionClosed as exc:
+                raise RuntimeError(
+                    f"the server hung up during the opening handshake for "
+                    f"{script.display_name} ({exc}); close code 1008 means it could not find "
+                    f"the meeting or the participant"
+                ) from exc
             stream.messages.append((_now_ms(), message))
             if message["type"] == "hello.ok":
                 stream.hello_ok_at = _now_ms()
@@ -232,6 +250,21 @@ class ReplayHarness:
                 return stream
             if message["type"] == "error" and message.get("fatal"):
                 raise RuntimeError(f"handshake refused: {message['code']} {message['message']}")
+
+    def _watch(self, stream: _Stream) -> None:
+        """Start reading a stream's socket, and remember the task."""
+        stream.reader = asyncio.create_task(self._read(stream))
+        self._readers.append(stream.reader)
+
+    @staticmethod
+    def _hello(session_token: str, last_ack: int | None) -> dict[str, Any]:
+        return {
+            "v": 1,
+            "type": "hello",
+            "session_token": session_token,
+            "last_ack_sequence": last_ack,
+            "client": {"ua": "replay-harness", "sample_rate": 24000},
+        }
 
     async def _hydrate(self, http: httpx.AsyncClient, meeting_id: str, stream: _Stream) -> None:
         """Fetch the transcript as this participant, the way their browser does.
@@ -254,20 +287,121 @@ class ReplayHarness:
 
     async def _read(self, stream: _Stream) -> None:
         async for raw in stream.socket:
+            message = json.loads(raw)
+            if message.get("type") == "ping":
+                # The harness is a client and owes the server the same answer a
+                # browser does (tech spec 7.4). Without this the server calls
+                # the socket dead after 30 s of one-way traffic — which is
+                # exactly what a long replay looks like once the audio stops.
+                with contextlib.suppress(Exception):
+                    await stream.socket.send(
+                        json.dumps({"v": 1, "type": "pong", "t": message.get("t", 0)})
+                    )
+                continue
+            # A keepalive is not transcript activity, so it must not keep
+            # `_wait_for_quiet` awake for ever.
             self._last_message_at = _now_ms()
-            stream.messages.append((self._last_message_at, json.loads(raw)))
+            stream.messages.append((self._last_message_at, message))
 
     async def _send(self, stream: _Stream) -> None:
-        """Pace one stream at `speed` times real time, without drifting."""
+        """Pace one stream at `speed` times real time, without drifting.
+
+        Faults are injected by stream offset rather than wall time, so a
+        disconnect lands at the same point in the transcript at 1x and at 10x
+        — which is the only way an accelerated replay can reproduce one.
+        """
+        script = stream.script
         loop = asyncio.get_running_loop()
         origin = loop.time()
         interval = FRAME_DURATION_MS / 1000.0 / self._speed
+        sent: list[tuple[int, bytes]] = []
+        offline: list[tuple[int, bytes]] = []
+        # Faults fire on the first frame at or past their offset rather than on
+        # an exact match: frames land every 80 ms, and a scenario should not
+        # have to know that to place a disconnect.
+        dropped = False
+        duplicated = False
+
         for sequence, payload in enumerate(iter_frames(stream.audio)):
+            offset_ms = sequence * FRAME_DURATION_MS
             delay = (origin + sequence * interval) - loop.time()
             if delay > 0:
                 await asyncio.sleep(delay)
+            else:
+                # Behind schedule, which at high speed factors is every frame:
+                # the deadline arithmetic then never awaits anything and this
+                # loop starves the reader task on the same event loop. The
+                # reader is what answers the server's pings, so without this
+                # yield a long fast replay looks like a one-way socket and the
+                # server correctly hangs up (tech spec 7.4). The same starving
+                # bug bit the server's own frame pump in Slice 1.
+                await asyncio.sleep(0)
+
+            if (
+                not dropped
+                and script.disconnect_at_ms is not None
+                and (offset_ms >= script.disconnect_at_ms)
+            ):
+                dropped = True
+                await self._drop_and_return(stream, offline)
+                origin = loop.time() - sequence * interval
+
+            if (
+                not duplicated
+                and script.duplicate_at_ms is not None
+                and (offset_ms >= script.duplicate_at_ms)
+            ):
+                duplicated = True
+                # Replay recent frames exactly as a client emptying its buffer
+                # would. The server must absorb them without duplicating text.
+                for old_seq, old_pcm in sent[-script.duplicate_frames :]:
+                    await stream.socket.send(
+                        encode_frame(old_seq, old_seq * FRAME_DURATION_MS, old_pcm)
+                    )
+                stream.duplicates_sent += min(script.duplicate_frames, len(sent))
+
+            sent.append((sequence, payload))
+            if not stream.online:
+                # Captured while offline: held, then replayed on reconnect, the
+                # same 15 s buffer the browser client keeps.
+                offline.append((sequence, payload))
+                continue
             stream.frame_sent_at.append(_now_ms())
-            await stream.socket.send(encode_frame(sequence, sequence * FRAME_DURATION_MS, payload))
+            await stream.socket.send(encode_frame(sequence, offset_ms, payload))
+
+    async def _drop_and_return(self, stream: _Stream, offline: list[tuple[int, bytes]]) -> None:
+        """Lose the socket, wait, come back, and replay what was captured."""
+        stream.online = False
+        stream.disconnects += 1
+        with contextlib.suppress(Exception):
+            await stream.socket.close()
+        await asyncio.sleep(stream.script.reconnect_after_ms / 1000.0)
+
+        socket = await self._stack.enter_async_context(
+            connect(f"{self._ws_base}/ws/meetings/{stream.meeting_id}", max_size=None)
+        )
+        await socket.send(json.dumps(self._hello(stream.session_token, stream.last_ack)))
+        while True:
+            try:
+                message = json.loads(await asyncio.wait_for(socket.recv(), timeout=15))
+            except ConnectionClosed as exc:
+                raise RuntimeError(
+                    f"the server hung up during the reconnect handshake for "
+                    f"{stream.display_name} ({exc}); close code 1008 means it could not find "
+                    f"the meeting or the participant"
+                ) from exc
+            stream.messages.append((_now_ms(), message))
+            if message["type"] == "hello.ok":
+                stream.resumed = bool(message.get("resume"))
+                break
+        stream.socket = socket
+        self._watch(stream)
+        stream.online = True
+
+        for sequence, payload in offline:
+            stream.frame_sent_at.append(_now_ms())
+            await socket.send(encode_frame(sequence, sequence * FRAME_DURATION_MS, payload))
+        offline.clear()
 
     async def _wait_for_quiet(self) -> None:
         """Wait until the transcript stops arriving, or give up."""
@@ -355,6 +489,9 @@ class ReplayHarness:
                     start_ms=s.script.start_ms,
                     frames_sent=len(s.frame_sent_at),
                     speaking_transitions=primary.speaking_transitions(s.participant_id),
+                    disconnects=s.disconnects,
+                    duplicates_sent=s.duplicates_sent,
+                    resumed=s.resumed,
                 )
                 for s in streams
             ],

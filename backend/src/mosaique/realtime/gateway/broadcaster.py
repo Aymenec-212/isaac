@@ -13,6 +13,8 @@ log = get_logger(__name__)
 class SocketLike(Protocol):
     async def send_json(self, data: Any) -> None: ...
 
+    async def close(self, code: int = 1000) -> None: ...
+
 
 class SocketBroadcaster:
     """Publishes runtime messages to every socket in a meeting."""
@@ -46,6 +48,17 @@ class SocketBroadcaster:
             except Exception:
                 # A dead socket must never stall the transcript pipeline.
                 log.info("broadcast_socket_dropped", participant_id=participant_id)
+
+    async def close_all(self, *, code: int) -> None:
+        """Close every socket in every meeting, ignoring the ones already gone."""
+        async with self._lock:
+            rooms = [dict(room) for room in self._sockets.values()]
+        for room in rooms:
+            for participant_id, socket in room.items():
+                try:
+                    await socket.close(code=code)
+                except Exception:
+                    log.info("close_socket_dropped", participant_id=participant_id)
 
     async def send_to(self, participant_id: str, message: dict[str, object]) -> None:
         for room in self._sockets.values():

@@ -21,7 +21,7 @@ export interface RosterEntry {
 }
 
 export interface ParticipantMessage {
-  type: "participant.joined" | "participant.left";
+  type: "participant.joined" | "participant.left" | "participant.reconnecting";
   participant_id: string;
   display_name: string;
 }
@@ -29,7 +29,8 @@ export interface ParticipantMessage {
 export interface SpeakingMessage {
   type: "participant.speaking";
   participant_id: string;
-  speaking: boolean;
+  /** Named `active` on the wire (tech spec 7.2). */
+  active: boolean;
 }
 
 export type RosterMessage = ParticipantMessage | SpeakingMessage;
@@ -49,8 +50,8 @@ export class ParticipantRoster {
     if (message.type === "participant.speaking") {
       // Speaking for someone we have never been told about would leave a
       // nameless row in the panel; drop it and wait for the join.
-      if (!existing || existing.speaking === message.speaking) return false;
-      this.entries.set(message.participant_id, { ...existing, speaking: message.speaking });
+      if (!existing || existing.speaking === message.active) return false;
+      this.entries.set(message.participant_id, { ...existing, speaking: message.active });
       return true;
     }
 

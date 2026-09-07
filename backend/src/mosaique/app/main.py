@@ -20,7 +20,7 @@ from mosaique.jobs import MeetingIntelligenceProcessor
 from mosaique.observability.logging import configure_logging, get_logger, request_id_var
 from mosaique.persistence.engine import dispose_engine, init_engine
 from mosaique.realtime.gateway import endpoint as ws_endpoint
-from mosaique.realtime.runtime_state import init_registry, shutdown_registry
+from mosaique.realtime.runtime_state import begin_drain, init_registry, shutdown_registry
 from mosaique.speech.adapters.fake import FakeRecognizer
 
 log = get_logger(__name__)
@@ -74,6 +74,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await recover_finalizing_meetings()
     log.info("app_started", environment=settings.environment, version=__version__)
     yield
+
+    # Tech spec 14.1, deployment row: refuse new joins first, then finalize what
+    # is open and hang up with 1012. Doing it in this order means nobody joins a
+    # meeting that is already being torn down.
+    begin_drain()
+    log.info("app_draining")
     await processor.stop()
     await shutdown_registry()
     await dispose_engine()

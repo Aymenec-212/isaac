@@ -147,6 +147,36 @@ class Segmenter:
             return [self._close("silence")]
         return []
 
+    def insert_gap(self, start_ms: int, end_ms: int) -> list[SegmenterEvent]:
+        """Mark a span of audio that was never transcribed (tech spec 8.3, 8.4).
+
+        A gap is a first-class segment, not an omission. The invariant it
+        protects is that final transcript text is never *silently* lost: audio
+        skipped because the queue overflowed, or missing because frames never
+        arrived, shows up as a visible marker at the right place on the
+        timeline, and the raw audio for that span is still on disk.
+
+        Any open segment is closed first, so a gap never lands inside a
+        sentence the recognizer was still building.
+        """
+        events: list[SegmenterEvent] = []
+        if self._open is not None:
+            events.append(self._close("gap_boundary"))
+        sequence = self._next_sequence
+        self._next_sequence += 1
+        events.append(
+            SegmentFinal(
+                sequence=sequence,
+                revision=1,
+                text="",
+                start_ms=start_ms,
+                end_ms=max(end_ms, start_ms),
+                words=[],
+                reason="gap",
+            )
+        )
+        return events
+
     def close_open(self, reason: str = "flush") -> list[SegmenterEvent]:
         """Force closure at end of meeting or session teardown (tech spec 11)."""
         if self._open is None:

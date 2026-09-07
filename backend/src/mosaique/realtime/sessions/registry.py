@@ -65,6 +65,15 @@ class MeetingRegistry:
             await runtime.drain()
             await runtime.stop()
 
+    async def close_sockets(self, *, code: int) -> None:
+        """Hang up on everyone, with a code that says why (tech spec 14.1).
+
+        1012 is "service restart", which is exactly what a deploy is. Clients
+        reconnect on it rather than treating it as a fatal error, and the
+        reconnect grace means they land back in their own segment.
+        """
+        await self.broadcaster.close_all(code=code)
+
     async def shutdown(self) -> None:
         for meeting_id in list(self._runtimes):
             await self.finalize(meeting_id)

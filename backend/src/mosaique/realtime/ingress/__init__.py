@@ -7,8 +7,10 @@ from mosaique.realtime.ingress.interfaces import (
     IngressEvent,
     MeetingIngress,
     MeetingRef,
+    ParticipantAudioState,
     ParticipantJoined,
     ParticipantLeft,
+    ResumeInfo,
 )
 
 __all__ = [
@@ -18,6 +20,8 @@ __all__ = [
     "IngressEvent",
     "MeetingIngress",
     "MeetingRef",
+    "ParticipantAudioState",
     "ParticipantJoined",
     "ParticipantLeft",
+    "ResumeInfo",
 ]

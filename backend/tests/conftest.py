@@ -215,6 +215,13 @@ class WsClient:
     def websocket_connect(self, path: str) -> ASGIWebSocket:
         return ASGIWebSocket(self._app, path)
 
+    @property
+    def registry(self):  # type: ignore[no-untyped-def]
+        """The live meeting registry, for asserting on state a socket cannot show."""
+        from mosaique.realtime.runtime_state import get_registry
+
+        return get_registry()
+
 
 @pytest.fixture
 async def ws_client(engine, runtime):  # type: ignore[no-untyped-def]

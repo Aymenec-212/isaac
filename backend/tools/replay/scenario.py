@@ -43,6 +43,14 @@ class ParticipantScript:
     synthetic_ms: int | None = None
     seed: int = 1
 
+    # Fault injection (tech spec 14.3). Offsets are in *stream* milliseconds —
+    # how far into this participant's own audio — so they land at the same
+    # point in the transcript whatever the speed factor.
+    disconnect_at_ms: int | None = None
+    reconnect_after_ms: int = 1_000
+    duplicate_at_ms: int | None = None
+    duplicate_frames: int = 12
+
     def __post_init__(self) -> None:
         if (self.pcm is None) == (self.synthetic_ms is None):
             raise ValueError(f"{self.display_name}: give exactly one of 'pcm' or 'synthetic_ms'")
