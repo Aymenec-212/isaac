@@ -33,7 +33,7 @@ from mosaique.realtime.ingress import (
 from mosaique.realtime.ingress.interfaces import IngressAudioFrame
 from mosaique.realtime.protocol.frames import FrameRejection, InvalidFrame, decode_frame
 from mosaique.realtime.protocol.messages import ErrorMessage, Hello, HelloOk, Ping, Pong
-from mosaique.realtime.runtime_state import get_registry
+from mosaique.realtime.runtime_state import get_registry, is_draining
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -88,6 +88,11 @@ class _Liveness:
 @router.websocket("/ws/meetings/{meeting_id}")
 async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
     await websocket.accept()
+    if is_draining():
+        # A deploy is in progress. 1012 is "service restart": clients reconnect
+        # on it rather than treating it as fatal (tech spec 14.1).
+        await websocket.close(code=1012)
+        return
     settings = get_settings()
     participant_id: str | None = None
     audio_session_id = new_id()

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import BinaryIO
 
 from mosaique.domain.ids import new_id
@@ -63,10 +64,27 @@ from mosaique.transcript.segmenter import (
     Segmenter,
     SegmenterEvent,
     SegmentFinal,
+    WordTiming,
     shift,
 )
 
 log = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class _PendingSegment:
+    """A final segment on its way to the database, held if it cannot get there."""
+
+    segment_id: str
+    participant_id: str
+    audio_session_id: str
+    sequence: int
+    start_ms: int
+    end_ms: int
+    text: str
+    words: list[WordTiming]
+    status: str
+
 
 # Finalization drain deadline, tech spec 11 step 3. [measure]
 DRAIN_DEADLINE_S = 20.0
@@ -85,6 +103,13 @@ IDLE_CLOSE_S = 30.0
 
 # How often the runtime looks for streams that have gone quiet.
 IDLE_SWEEP_S = 1.0
+
+# Tech spec 14.1: how many final segments the runtime will hold while the
+# database is unreachable before it stops claiming the transcript is safe. The
+# audio file keeps being written throughout, so nothing is lost outright — but
+# memory is not the record (ADR-05), and pretending otherwise indefinitely
+# would be a lie the client cannot see.
+PERSISTENCE_BUFFER_MAX = 200
 
 # How long the reader waits for the next recognizer event before checking for
 # silence. Short enough to keep segment closing responsive, long enough that a
@@ -130,6 +155,7 @@ class MeetingRuntime:
         self._frame_arrival_ms: dict[str, int] = {}
         self._file_frames: dict[str, int] = {}
         self._stream_status: dict[str, str] = {}
+        self._pending: list[_PendingSegment] = []
         self._consumer: asyncio.Task[None] | None = None
         self._idle_sweep: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
@@ -580,18 +606,19 @@ class MeetingRuntime:
         # A gap is stored as a segment with its own status so a reader can tell
         # "nobody spoke here" from "we could not transcribe this" (spec 8.4).
         status = "gap" if event.reason == "gap" else "final"
-        async with session_scope() as db:
-            segment_id = await SegmentRepository(db, self.meeting.organization_id).add_final(
-                meeting_id=self.meeting.meeting_id,
-                participant_id=session.participant_id,
-                audio_session_id=session.audio_session_id,
-                sequence=event.sequence,
-                start_ms=event.start_ms,
-                end_ms=event.end_ms,
-                text=event.text,
-                words=event.words,
-                status=status,
-            )
+        segment_id = new_id()
+        pending = _PendingSegment(
+            segment_id=segment_id,
+            participant_id=session.participant_id,
+            audio_session_id=session.audio_session_id,
+            sequence=event.sequence,
+            start_ms=event.start_ms,
+            end_ms=event.end_ms,
+            text=event.text,
+            words=event.words,
+            status=status,
+        )
+        await self._persist(session, pending)
         await self._broadcaster.publish(
             self.meeting.meeting_id,
             TranscriptSegmentFinal(
@@ -604,6 +631,46 @@ class MeetingRuntime:
                 end_ms=event.end_ms,
             ).model_dump(),
         )
+
+    async def _persist(self, session: ParticipantSession, segment: _PendingSegment) -> None:
+        """Write a segment, or hold it until the database comes back.
+
+        Tech spec 14.1. The transcript is still broadcast either way — the
+        client should see what was said — and every held segment is retried
+        ahead of the next one, so recovery needs no separate sweep.
+        """
+        self._pending.append(segment)
+        try:
+            async with session_scope() as db:
+                repo = SegmentRepository(db, self.meeting.organization_id)
+                for held in self._pending:
+                    await repo.add_final(
+                        meeting_id=self.meeting.meeting_id,
+                        participant_id=held.participant_id,
+                        audio_session_id=held.audio_session_id,
+                        sequence=held.sequence,
+                        start_ms=held.start_ms,
+                        end_ms=held.end_ms,
+                        text=held.text,
+                        words=held.words,
+                        status=held.status,
+                        segment_id=held.segment_id,
+                    )
+        except Exception as exc:
+            log.error(
+                "segment_persist_failed",
+                error_type=type(exc).__name__,
+                held=len(self._pending),
+            )
+            if len(self._pending) >= PERSISTENCE_BUFFER_MAX:
+                # Past here the runtime is holding more than it promised to.
+                # Say so rather than let the buffer grow without bound.
+                del self._pending[:-PERSISTENCE_BUFFER_MAX]
+                await self._publish_status(segment.participant_id, "unavailable")
+        else:
+            if self._pending:
+                log.info("segments_persisted", count=len(self._pending))
+            self._pending.clear()
 
     # ---- finalization ----------------------------------------------------
 
