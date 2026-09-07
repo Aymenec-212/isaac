@@ -321,6 +321,15 @@ class ReplayHarness:
             delay = (origin + sequence * interval) - loop.time()
             if delay > 0:
                 await asyncio.sleep(delay)
+            else:
+                # Behind schedule, which at high speed factors is every frame:
+                # the deadline arithmetic then never awaits anything and this
+                # loop starves the reader task on the same event loop. The
+                # reader is what answers the server's pings, so without this
+                # yield a long fast replay looks like a one-way socket and the
+                # server correctly hangs up (tech spec 7.4). The same starving
+                # bug bit the server's own frame pump in Slice 1.
+                await asyncio.sleep(0)
 
             if (
                 not dropped
