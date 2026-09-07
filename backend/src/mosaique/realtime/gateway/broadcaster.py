@@ -13,6 +13,8 @@ log = get_logger(__name__)
 class SocketLike(Protocol):
     async def send_json(self, data: Any) -> None: ...
 
+    async def close(self, code: int = 1000) -> None: ...
+
 
 class SocketBroadcaster:
     """Publishes runtime messages to every socket in a meeting."""

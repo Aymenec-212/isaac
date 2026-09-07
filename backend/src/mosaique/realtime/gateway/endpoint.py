@@ -104,20 +104,30 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
 
         previous = await registry.broadcaster.register(meeting_id, participant_id, websocket)
         if previous is not None:
-            # Tech spec 7.4: a second tab must not double the audio.
+            # Tech spec 7.4: a second tab must not double the audio. Telling the
+            # first socket is not enough — a client that ignores the error would
+            # keep streaming — so it is closed here rather than asked to leave.
             with contextlib.suppress(Exception):
                 await previous.send_json(
                     ErrorMessage(
                         code="SESSION_REPLACED", message="Meeting opened elsewhere", fatal=True
                     ).model_dump()
                 )
+            with contextlib.suppress(Exception):
+                await previous.close(code=1000)
 
-        await registry.ensure(
+        runtime = await registry.ensure(
             MeetingRef(meeting_id=meeting_id, organization_id=organization_id),
             started_at_ms,
         )
         ingress = registry.ingress_for(meeting_id)
         assert ingress is not None
+
+        # Tech spec 7.4: a `hello` inside the reconnect grace resumes the stream
+        # in place. The runtime owns that decision; the gateway only reports it,
+        # and carries the sequence forward so a replayed client buffer is still
+        # checked for duplicates.
+        resume = runtime.resume_info(participant_id)
 
         ingress.submit(
             ParticipantJoined(
@@ -132,12 +142,18 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                 display_name=display_name,
                 meeting_state=str(MeetingState.LIVE),
                 meeting_started_at=started_at_ms,
+                resume=resume.resuming,
             ).model_dump()
         )
-        log.info("ws_connected", meeting_id=meeting_id, participant_id=participant_id)
+        log.info(
+            "ws_connected",
+            meeting_id=meeting_id,
+            participant_id=participant_id,
+            resume=resume.resuming,
+        )
 
         # ---- frame loop ----------------------------------------------------
-        last_seq = -1
+        last_seq = resume.last_sequence
         while True:
             message = await websocket.receive()
             if message.get("type") == "websocket.disconnect":

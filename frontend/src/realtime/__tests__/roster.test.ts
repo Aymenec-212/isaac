@@ -21,7 +21,7 @@ const left = (pid: string, name: string): ParticipantMessage => ({
 const speaking = (pid: string, on: boolean): SpeakingMessage => ({
   type: "participant.speaking",
   participant_id: pid,
-  speaking: on,
+  active: on,
 });
 
 describe("ParticipantRoster", () => {

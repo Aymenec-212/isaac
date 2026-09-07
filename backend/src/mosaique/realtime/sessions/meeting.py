@@ -30,6 +30,7 @@ from mosaique.realtime.ingress import (
     MeetingRef,
     ParticipantJoined,
     ParticipantLeft,
+    ResumeInfo,
 )
 from mosaique.realtime.protocol.messages import (
     ParticipantEvent,
@@ -60,6 +61,12 @@ log = get_logger(__name__)
 
 # Finalization drain deadline, tech spec 11 step 3. [measure]
 DRAIN_DEADLINE_S = 20.0
+
+# How long a participant's stream survives losing its transport, tech spec 7.4.
+# The ASR session and the segmenter are held open for this long, so a client
+# that reconnects inside the window continues its segment rather than splitting
+# it. [measure]
+RECONNECT_GRACE_S = 30.0
 
 # How long the reader waits for the next recognizer event before checking for
 # silence. Short enough to keep segment closing responsive, long enough that a
@@ -97,6 +104,8 @@ class MeetingRuntime:
         # D-04 honest once there is more than one participant.
         self._roster: dict[str, str] = {}
         self._speaking: set[str] = set()
+        # Streams whose transport has gone but whose grace has not expired.
+        self._grace: dict[str, asyncio.Task[None]] = {}
         self._files: dict[str, BinaryIO] = {}
         self._pumps: dict[str, asyncio.Task[None]] = {}
         self._first_word_seen: set[str] = set()
@@ -131,8 +140,23 @@ class MeetingRuntime:
         elif isinstance(event, IngressError):
             log.warning("ingress_error", code=event.code, participant_id=event.participant_id)
 
+    def resume_info(self, participant_id: str) -> ResumeInfo:
+        """What the gateway needs to answer a `hello` (tech spec 7.4).
+
+        Read-only, and deliberately the *only* thing the transport may ask the
+        runtime. It says whether this participant still has a live stream — so
+        `hello.ok` can set `resume` — and how far its sequence got, so the
+        gateway can go on rejecting duplicates across a reconnect instead of
+        starting again from -1 and letting a replayed buffer through.
+        """
+        session = self._sessions.get(participant_id)
+        if session is None:
+            return ResumeInfo(resuming=False, last_sequence=-1)
+        return ResumeInfo(resuming=True, last_sequence=session.last_sequence)
+
     async def _open_participant(self, event: ParticipantJoined) -> None:
         if event.participant_id in self._sessions:
+            await self._resume_participant(event)
             return
 
         # ADR-11: the anchor is server receive time relative to meeting start.
@@ -178,6 +202,35 @@ class MeetingRuntime:
             "participant_stream_opened",
             participant_id=event.participant_id,
             epoch_ms=epoch_ms,
+        )
+
+    async def _resume_participant(self, event: ParticipantJoined) -> None:
+        """A `hello` arrived for a stream that is still alive (tech spec 7.4).
+
+        Nothing is rebuilt. The ASR session, the segmenter and the audio file
+        keep going, and the runtime keeps its own `audio_session_id` rather
+        than the one the new socket minted — which is what makes a reconnect
+        continue the segment instead of starting a new one. Frames the client
+        buffered while it was away are accepted because their `seq` continues
+        the sequence the session already has.
+        """
+        grace = self._grace.pop(event.participant_id, None)
+        if grace is not None:
+            grace.cancel()
+        session = self._sessions[event.participant_id]
+        session.reconnected()
+        await self._broadcaster.publish(
+            self.meeting.meeting_id,
+            ParticipantEvent(
+                type="participant.joined",
+                participant_id=event.participant_id,
+                display_name=self._roster.get(event.participant_id, event.display_name),
+            ).model_dump(),
+        )
+        log.info(
+            "participant_stream_resumed",
+            participant_id=event.participant_id,
+            last_sequence=session.last_sequence,
         )
 
     async def _announce(self, event: ParticipantJoined) -> None:
@@ -324,7 +377,7 @@ class MeetingRuntime:
         self._speaking.symmetric_difference_update({participant_id})
         await self._broadcaster.publish(
             self.meeting.meeting_id,
-            ParticipantSpeaking(participant_id=participant_id, speaking=speaking).model_dump(),
+            ParticipantSpeaking(participant_id=participant_id, active=speaking).model_dump(),
         )
 
     async def _emit(self, session: ParticipantSession, events: Sequence[SegmenterEvent]) -> None:
@@ -379,6 +432,10 @@ class MeetingRuntime:
         `flush()` is the D-05 accelerated catch-up rather than a wait, which is
         what keeps this deadline generous instead of tight.
         """
+        for task in self._grace.values():
+            task.cancel()
+        self._grace.clear()
+
         for session in self._sessions.values():
             await session.stop()
 
@@ -411,9 +468,49 @@ class MeetingRuntime:
         self._files.clear()
 
     async def _close_participant(self, participant_id: str) -> None:
+        """The transport went away. That is not the same as leaving.
+
+        Tech spec 7.4 gives the client `RECONNECT_GRACE_S` to come back, so the
+        stream is held open and the panel says "reconnecting". Only when the
+        grace expires is the segment finalized and the participant announced as
+        gone.
+        """
+        session = self._sessions.get(participant_id)
+        if session is None or participant_id in self._grace:
+            return
+        session.disconnected()
+        await self._set_speaking(participant_id, False)
+        display_name = self._roster.get(participant_id)
+        if display_name is not None:
+            await self._broadcaster.publish(
+                self.meeting.meeting_id,
+                ParticipantEvent(
+                    type="participant.reconnecting",
+                    participant_id=participant_id,
+                    display_name=display_name,
+                ).model_dump(),
+            )
+        self._grace[participant_id] = asyncio.create_task(self._expire_grace(participant_id))
+
+    async def _expire_grace(self, participant_id: str) -> None:
+        """The client did not come back. Finalize the stream for good."""
+        try:
+            await asyncio.sleep(RECONNECT_GRACE_S)
+        except asyncio.CancelledError:
+            return
+        self._grace.pop(participant_id, None)
+        session = self._sessions.pop(participant_id, None)
+        if session is None:
+            return
+
+        await session.stop()
+        pump = self._pumps.pop(participant_id, None)
+        if pump is not None:
+            await asyncio.wait({pump}, timeout=5.0)
+        await self._finalize_session(session)
+
         display_name = self._roster.pop(participant_id, None)
         if display_name is not None:
-            await self._set_speaking(participant_id, False)
             await self._broadcaster.publish(
                 self.meeting.meeting_id,
                 ParticipantEvent(
@@ -422,12 +519,31 @@ class MeetingRuntime:
                     display_name=display_name,
                 ).model_dump(),
             )
-        session = self._sessions.get(participant_id)
-        if session is None:
-            return
-        await session.stop()
+        log.info("participant_stream_expired", participant_id=participant_id)
+
+    async def _finalize_session(self, session: ParticipantSession) -> None:
+        """Close one stream's ASR session, open segment, audio file and row."""
+        try:
+            await asyncio.wait_for(session.asr_session.flush(), timeout=5.0)
+            await self._emit(session, session.segmenter.close_open())
+            await session.asr_session.close()
+        except TimeoutError:
+            log.warning("finalize_drain_timeout", participant_id=session.participant_id)
+
+        async with session_scope() as db:
+            await AudioSessionRepository(db, self.meeting.organization_id).finish(
+                session.audio_session_id,
+                frames_received=session.frames_received,
+                frames_dropped=session.frames_dropped,
+            )
+        handle = self._files.pop(session.participant_id, None)
+        if handle is not None:
+            handle.close()
 
     async def stop(self) -> None:
+        for task in self._grace.values():
+            task.cancel()
+        self._grace.clear()
         for pump in self._pumps.values():
             pump.cancel()
         if self._consumer is not None:

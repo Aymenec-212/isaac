@@ -57,6 +57,19 @@ class IngressError:
 IngressEvent = ParticipantJoined | ParticipantLeft | IngressAudioFrame | IngressError
 
 
+@dataclass(frozen=True)
+class ResumeInfo:
+    """What a `hello` needs to know about an existing stream (tech spec 7.4).
+
+    The only thing the transport may ask the runtime, and it asks nothing about
+    sockets: whether this participant's stream is still alive, and how far its
+    frame sequence got.
+    """
+
+    resuming: bool
+    last_sequence: int
+
+
 @runtime_checkable
 class MeetingIngress(Protocol):
     async def start(self, meeting: MeetingRef) -> None: ...

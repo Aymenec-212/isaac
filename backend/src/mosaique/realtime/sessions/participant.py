@@ -57,6 +57,10 @@ class ParticipantSession:
 
         self._queue: asyncio.Queue[QueuedFrame | None] = asyncio.Queue(maxsize=QUEUE_MAX_FRAMES)
         self._last_seq: int | None = None
+        # Transport state. The stream outlives its socket for the length of the
+        # reconnect grace (tech spec 7.4), so "connected" is a property of this
+        # session rather than of whether a socket object exists.
+        self.connected = True
         self.frames_received = 0
         self.frames_missing = 0
         self.frames_dropped = 0
@@ -102,6 +106,21 @@ class ParticipantSession:
             self.frames_dropped += 1
             return False
         return True
+
+    @property
+    def last_sequence(self) -> int:
+        """The highest `seq` accepted so far; -1 before the first frame.
+
+        The gateway seeds a resumed socket from this so a client replaying its
+        buffer cannot smuggle duplicates past the check by reconnecting.
+        """
+        return -1 if self._last_seq is None else self._last_seq
+
+    def disconnected(self) -> None:
+        self.connected = False
+
+    def reconnected(self) -> None:
+        self.connected = True
 
     @property
     def queue_depth(self) -> int:
