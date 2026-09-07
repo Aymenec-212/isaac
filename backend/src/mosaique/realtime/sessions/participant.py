@@ -22,6 +22,15 @@ from mosaique.transcript.segmenter import Segmenter
 QUEUE_LAGGING_FRAMES = 25  # ~2 s
 QUEUE_MAX_FRAMES = 62  # ~5 s
 
+# Tech spec 8.4: a stream that has been at the queue ceiling for this long is
+# not going to catch up. The ASR session is closed and the stream reported
+# `unavailable`; audio keeps being recorded either way. [measure]
+OVERLOAD_FAILURE_S = 15.0
+
+# Tech spec 8.3: a run of missing frames longer than this is marked in the
+# transcript rather than quietly padded with silence.
+GAP_MARKER_MS = 2_000
+
 # A seq gap wider than this is a genuine outage rather than a lost packet, and
 # padding it would write minutes of silence. Slice 3 closes the AudioSession
 # instead (blueprint D-02); Slice 1 simply caps the padding.
@@ -65,6 +74,12 @@ class ParticipantSession:
         # Muted on purpose, rather than silent by accident (blueprint R-1).
         self.paused = False
         self._last_frame_at = time.monotonic()
+        # Overload bookkeeping (tech spec 8.4). `_skipped_from` is the first
+        # sequence dropped from the ASR queue in the current run of overload;
+        # the span it opens becomes one gap segment when the pressure lifts.
+        self.frames_skipped = 0
+        self._skipped_from: int | None = None
+        self._overloaded_since: float | None = None
         self.frames_received = 0
         self.frames_missing = 0
         self.frames_dropped = 0
@@ -106,11 +121,40 @@ class ParticipantSession:
         try:
             self._queue.put_nowait(QueuedFrame(seq=seq, pcm=pcm, received_at_ms=received_at_ms))
         except asyncio.QueueFull:
-            # Slice 1 counts the loss. Slice 3 adds the visible `gap` segment
-            # and the `stream.status` transitions that go with it.
+            # Tech spec 8.4: the frame leaves the ASR queue, not the audio file.
+            # The caller writes it to disk regardless, so the span stays
+            # recoverable even though it will never be transcribed.
             self.frames_dropped += 1
+            self.frames_skipped += 1
+            if self._skipped_from is None:
+                self._skipped_from = seq
+                self._overloaded_since = time.monotonic()
             return False
+        if self._skipped_from is not None:
+            self._overloaded_since = None
         return True
+
+    def take_skipped_span(self) -> tuple[int, int] | None:
+        """The run of sequences dropped from the ASR queue, once it has ended.
+
+        Returned once and then forgotten, so the runtime emits exactly one gap
+        segment per run of overload rather than one per frame.
+        """
+        if self._skipped_from is None or self.queue_full:
+            return None
+        span = (self._skipped_from, self.last_sequence)
+        self._skipped_from = None
+        return span
+
+    @property
+    def queue_full(self) -> bool:
+        return self._queue.full()
+
+    def overloaded_for_s(self) -> float:
+        """How long this stream has been stuck at the ceiling (tech spec 8.4)."""
+        if self._overloaded_since is None:
+            return 0.0
+        return time.monotonic() - self._overloaded_since
 
     @property
     def last_sequence(self) -> int:
@@ -144,6 +188,11 @@ class ParticipantSession:
     @property
     def lagging(self) -> bool:
         return self.queue_depth >= QUEUE_LAGGING_FRAMES
+
+    @property
+    def lag_ms(self) -> int:
+        """How far behind the recognizer is, in milliseconds of queued audio."""
+        return self.queue_depth * FRAME_DURATION_MS
 
     async def next_frame(self) -> QueuedFrame | None:
         return await self._queue.get()

@@ -37,12 +37,19 @@ from mosaique.realtime.ingress import (
 from mosaique.realtime.protocol.messages import (
     ParticipantEvent,
     ParticipantSpeaking,
+    StreamStatus,
     TranscriptDelta,
     TranscriptSegmentFinal,
 )
-from mosaique.realtime.sessions.participant import ParticipantSession
+from mosaique.realtime.sessions.participant import (
+    GAP_MARKER_MS,
+    MAX_PADDING_FRAMES,
+    OVERLOAD_FAILURE_S,
+    ParticipantSession,
+)
 from mosaique.speech.audio import AudioStore
 from mosaique.speech.interfaces import (
+    FRAME_DURATION_MS,
     SILENCE_FRAME,
     ASRErrorEvent,
     ASREvent,
@@ -121,6 +128,8 @@ class MeetingRuntime:
         self._pumps: dict[str, asyncio.Task[None]] = {}
         self._first_word_seen: set[str] = set()
         self._frame_arrival_ms: dict[str, int] = {}
+        self._file_frames: dict[str, int] = {}
+        self._stream_status: dict[str, str] = {}
         self._consumer: asyncio.Task[None] | None = None
         self._idle_sweep: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
@@ -350,9 +359,101 @@ class MeetingRuntime:
             # A frame is the clearest possible statement that they are back.
             session.paused = False
         self._frame_arrival_ms.setdefault(frame.participant_id, _now_ms())
+
+        # Tech spec 8.4: the audio file is written here, on arrival, and not in
+        # the pump. A frame the ASR queue has no room for is still this
+        # participant's audio, and the promise is that a skipped span stays
+        # recoverable from disk even though it is never transcribed.
+        self._write_arrival(session, frame.seq, frame.pcm)
+
+        # Tech spec 8.3: frames that never arrived are padded with silence so
+        # the timeline stays true, but a long run of them is marked rather than
+        # left as an unexplained silence in the middle of someone talking.
+        missing_from = session.last_sequence + 1
+        missing = frame.seq - missing_from
         session.accept(frame.seq, frame.pcm, _now_ms())
+        if missing * FRAME_DURATION_MS > GAP_MARKER_MS:
+            await self._emit_gap(session, missing_from, frame.seq - 1)
+
+        await self._update_stream_status(session)
 
     # ---- the per-participant pipeline ------------------------------------
+
+    def _write_arrival(self, session: ParticipantSession, seq: int, pcm: bytes) -> None:
+        """Write one frame to the audio file at its sequence position.
+
+        Padding any missing sequences keeps the file exactly seq-indexed, which
+        is what makes `byte_offset = session_ms * BYTES_PER_MS` hold and FR-11
+        navigation pure arithmetic (blueprint D-02).
+        """
+        handle = self._files.get(session.participant_id)
+        if handle is None:
+            return
+        written = self._file_frames.get(session.participant_id, 0)
+        if seq < written:
+            return  # a duplicate; the sequence is already on disk
+        padding = min(seq - written, MAX_PADDING_FRAMES)
+        if padding:
+            handle.write(SILENCE_FRAME * padding)
+        handle.write(pcm)
+        self._file_frames[session.participant_id] = seq + 1
+
+    async def _update_stream_status(self, session: ParticipantSession) -> None:
+        """Map queue depth onto the five states of tech spec 8.4."""
+        if session.overloaded_for_s() >= OVERLOAD_FAILURE_S:
+            await self._fail_stream(session)
+            return
+
+        span = session.take_skipped_span()
+        if span is not None:
+            await self._emit_gap(session, *span)
+
+        if session.paused:
+            status = "listening"
+        elif session.queue_full or session.lagging:
+            status = "delayed"
+        else:
+            status = "transcribing"
+        await self._publish_status(session.participant_id, status, session.lag_ms)
+
+    async def _publish_status(self, participant_id: str, status: str, lag_ms: int = 0) -> None:
+        """Publish only on a change; the depth moves every 80 ms."""
+        if self._stream_status.get(participant_id) == status:
+            return
+        self._stream_status[participant_id] = status
+        await self._broadcaster.publish(
+            self.meeting.meeting_id,
+            StreamStatus(
+                participant_id=participant_id,
+                status=status,  # type: ignore[arg-type]
+                lag_ms=lag_ms,
+            ).model_dump(),
+        )
+
+    async def _emit_gap(self, session: ParticipantSession, first_seq: int, last_seq: int) -> None:
+        """One visible marker for a run of audio that was never transcribed."""
+        METRICS.frames_skipped(last_seq - first_seq + 1)
+        log.warning(
+            "asr_frames_skipped",
+            participant_id=session.participant_id,
+            frames=last_seq - first_seq + 1,
+        )
+        for event in session.segmenter.insert_gap(
+            first_seq * FRAME_DURATION_MS, (last_seq + 1) * FRAME_DURATION_MS
+        ):
+            shifted = shift(event, session.epoch_ms)
+            if isinstance(shifted, SegmentFinal):
+                await self._persist_and_publish(session, shifted)
+
+    async def _fail_stream(self, session: ParticipantSession) -> None:
+        """Sustained overload: stop transcribing, keep recording (spec 8.4)."""
+        if self._stream_status.get(session.participant_id) == "unavailable":
+            return
+        await self._publish_status(session.participant_id, "unavailable")
+        span = session.take_skipped_span()
+        if span is not None:
+            await self._emit_gap(session, *span)
+        log.error("stream_unavailable", participant_id=session.participant_id)
 
     async def _pump(self, session: ParticipantSession) -> None:
         """Queue -> recognizer -> segmenter -> broadcast + persist."""
@@ -362,8 +463,7 @@ class MeetingRuntime:
                 frame = await session.next_frame()
                 if frame is None:
                     break
-                padding = await session.push(frame)
-                self._write_audio(session, frame.pcm, padding)
+                await session.push(frame)
                 # Pushing a frame never awaits anything real, so without this
                 # the pump can drain a full queue without once yielding and
                 # starve the reader that is turning those frames into text.
@@ -379,15 +479,6 @@ class MeetingRuntime:
             raise
         finally:
             reader.cancel()
-
-    def _write_audio(self, session: ParticipantSession, pcm: bytes, padding: int) -> None:
-        """Padding goes to the file too, so byte offset maps to session time."""
-        handle = self._files.get(session.participant_id)
-        if handle is None:
-            return
-        if padding:
-            handle.write(SILENCE_FRAME * padding)
-        handle.write(pcm)
 
     async def _read_events(self, session: ParticipantSession) -> None:
         """Single owner of the segmenter: recognizer events in, segments out.
@@ -486,6 +577,9 @@ class MeetingRuntime:
                 await self._persist_and_publish(session, event)
 
     async def _persist_and_publish(self, session: ParticipantSession, event: SegmentFinal) -> None:
+        # A gap is stored as a segment with its own status so a reader can tell
+        # "nobody spoke here" from "we could not transcribe this" (spec 8.4).
+        status = "gap" if event.reason == "gap" else "final"
         async with session_scope() as db:
             segment_id = await SegmentRepository(db, self.meeting.organization_id).add_final(
                 meeting_id=self.meeting.meeting_id,
@@ -496,6 +590,7 @@ class MeetingRuntime:
                 end_ms=event.end_ms,
                 text=event.text,
                 words=event.words,
+                status=status,
             )
         await self._broadcaster.publish(
             self.meeting.meeting_id,
