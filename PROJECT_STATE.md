@@ -1,10 +1,12 @@
 # PROJECT_STATE.md
 
 **Project:** Mosaïque — realtime meeting intelligence, French-first
-**Last updated:** 2026-09-06 (rev 6 — Slice 2 complete except two field checks)
-**Updated by:** Slice 2 implementation
-**Current slice:** Slice 2 VERIFIED in software. Two exit-gate items need hardware
-this environment does not have: the cross-network run (A-8) and Spike A.
+**Last updated:** 2026-09-07 (rev 7 — Slice 2 merged; Slice 3 in progress)
+**Updated by:** Slice 3 implementation
+**Current slice:** **Slice 3 — failure behavior. IN PROGRESS.** Slice 2 is merged to
+`main` (PR #1) and VERIFIED, browser specs included. Two Slice 2 exit-gate items
+remain open because they need hardware, not code: the cross-network run (A-8)
+and Spike A.
 **Maturity level (skill §41):** Level 1 — functional prototype, multi-participant, fake models
 
 ---
@@ -35,12 +37,12 @@ The PRD says what the product should do. The technical specification says how it
 | `BLOCKED` | Cannot proceed. Blocker named. |
 | `REMOVED` | Was built, then taken out. Reason recorded. |
 
-**Slices 0 and 1 are VERIFIED, browser tests included — the Playwright suite now
-runs (L-12 closed). Slice 2 is VERIFIED in software: the replay harness, the
-multi-participant runtime, and both browsers are covered by named tests. Two
-items on its exit gate are NOT done and are not claimed: a real cross-network
-run between two physical machines (A-8), and Spike A. Everything from Slice 3
-onward is still `SPECIFIED`.**
+**Slices 0, 1 and 2 are VERIFIED, browser specs included (L-12 closed). Slice 2
+merged to `main` as PR #1 on 2026-09-07; both Playwright specs were re-run
+locally by the maintainer against a real browser and passed. Two items on the
+Slice 2 gate are NOT done and are not claimed: a cross-network run between two
+physical machines (A-8), and Spike A — both need hardware. Slice 3 is
+IN PROGRESS. Everything from Slice 4 onward is still `SPECIFIED`.**
 
 ---
 
@@ -48,15 +50,15 @@ onward is still `SPECIFIED`.**
 
 | Field | Value |
 |---|---|
-| Repository | created; 4 commits on `main` |
+| Repository | `main` through PR #1 (Slice 2). Work branch `claude/awesome-ritchie-iu6uut`, restarted from `main` |
 | Runnable | yes — `docker compose up`, or uv + local PostgreSQL |
 | Deployed | no |
 | Real audio ever transcribed by this system | **no — every model in the path is a fake** |
 | Tests passing | **137**: 85 backend unit, 32 backend integration (real PostgreSQL), 18 frontend unit, 2 Playwright browser specs |
 | Lint / types | ruff clean; mypy strict clean on 73 source files (the harness included); `tsc --noEmit` clean |
 | Known gap | A-8 unvalidated: every run so far is loopback on one machine. Spike A not run. **No CI runs on this repository** — see L-18. |
-| Next action | the two field checks above, then Slice 3 — failure behavior |
-| Next gate | Slice 3 exit: the tech spec §14.1 failure matrix, a passing test per row |
+| Next action | Slice 3 — failure behavior (in progress; see §12) |
+| Next gate | Slice 3 exit: the tech spec §14.1 failure matrix, a passing test per row that needs no real model |
 
 ---
 
@@ -267,8 +269,8 @@ Every `[measure]` placeholder in the technical specification. A value here means
 | `tests/integration/` | create/read/list, tenancy, durability, join, live transcript, end idempotency, job retry, failure isolation, startup recovery | **28 passing** |
 | `tests/integration/test_replay.py` | two streams merged and attributed; 1x ≡ 10x; roster and speaking; report shape | **4 passing** — runs a real app-server subprocess and drives it over real WebSockets |
 | `frontend src/**/*.test.ts` | transcript reconciler (11), participant roster (7) | **18 passing** (vitest) |
-| `e2e/meeting.spec.ts` | full single-participant browser flow with a fake microphone | **1 passing** (L-12 closed) |
-| `e2e/two-participants.spec.ts` | two browsers, merged attributed transcript, roster, speaking indicator | **1 passing** |
+| `e2e/meeting.spec.ts` | full single-participant browser flow with a fake microphone | **1 passing** (L-12 closed); confirmed on the maintainer's machine 2026-09-07 |
+| `e2e/two-participants.spec.ts` | two browsers, merged attributed transcript, roster, speaking indicator | **1 passing**; confirmed on the maintainer's machine 2026-09-07 |
 | `tests/realtime/` | disconnect, duplicates, ASR stall, long-run memory | NOT WRITTEN — Slice 3 |
 | smoke (real model) | WER + latency on French fixture | NOT WRITTEN — Slice 4 |
 | cross-network run (A-8) | two physical machines, one meeting | **NOT RUN** — needs a second machine. `tools/replay --base-url` is the harness for it |
@@ -311,6 +313,86 @@ Current, as of planning. Each is a deliberate choice, not an oversight.
 | 2026-09-03 | rev 2. Platform research folded into prototype scope. **Reverted in rev 3 as scope creep.** |
 | 2026-09-06 | **rev 5. Slice 1 complete.** Full spine on fakes: WS gateway, `MeetingIngress` seam, ParticipantSession with the ADR-11 timeline, pure segmenter, evidence-validated intelligence, job processor with retries, and the browser UI (worklet, WS client, reconciler, join/live/review). 121 tests. Four bugs found by the tests and fixed: an `AudioSession` id mismatch breaking every segment insert; a frame pump that starved the reader; a cancelled `anext` silently killing the event stream; and silence detection comparing stream time against wall time, which fabricated segment breaks whenever audio arrived faster than real time. One test-isolation bug fixed: jobs leaked between tests, so the processor claimed a previous test's work. |
 | 2026-09-05 | rev 4. Slice 0 complete and VERIFIED.** Repo initialised (uv, not pip). Migration `0001` creates all eight tables. `POST/GET /meetings`, `GET /meetings/{id}`, `/livez`. React app with an OpenAPI-generated typed client. 46 tests, ruff clean, mypy strict clean. CI added, including a contract-drift job that fails when the committed OpenAPI document does not match the code. One contract gap found and fixed during the slice: the error envelope was in the spec but absent from OpenAPI, so the generated client could not type it. |
+| 2026-09-07 | **rev 7.** Slice 2 merged to `main` as PR #1. Both Playwright specs re-run locally by the maintainer against a real browser and passed, which is what moves Slice 2 from "verified in this sandbox" to verified. `__pycache__` untracked (L-17 narrowed to `node_modules` alone). §12 "Where to pick up" added so a cold session can start without re-deriving the environment or the Slice 3 scope. Slice 3 begun. |
 | 2026-09-06 | rev 6a. Correction, not new work: **the CI that rev 4 claimed does not exist.** No `.github/` on `main` or any branch, not gitignored, and PR #1 reports zero check runs. Recorded as L-18. Every "passes" in rev 6 below was measured locally in this session and is not enforced anywhere. |
 | 2026-09-06 | **rev 6. Slice 2 complete in software.** `tools/replay` v1 drives N streams into the real gateway over real WebSockets at a chosen speed and writes a JSON report with per-segment latency. Multi-participant runtime: roster and speaking derived from ingress events only, never from socket counts. Frontend participant panel, per-speaker attribution, cross-participant ordering. 137 tests (85 backend unit, 32 backend integration, 18 frontend unit, 2 Playwright specs — both now executed, closing L-12). **Two bugs found, both by the harness.** First: the frame pump still ticked the segmenter with audio *pushed* rather than audio *transcribed*, so a phrase split whenever the reader lagged — the ADR-11 bug half-reintroduced, and the cause of L-13, now closed. Second, in the repository rather than the code: `.gitignore`'s unanchored `audio/` also matched `backend/src/mosaique/speech/audio/`, so `store.py` had never been committed and a clean checkout could not start the app. **Not done, not claimed:** the cross-network run (A-8) and Spike A both need hardware this environment does not have. |
 | 2026-09-03 | rev 3. Prototype scope restored; Technical Specification v0.1 is normative. D-01 restored. D-04 reduced to a minimal `MeetingIngress` seam (one Protocol, one enum column); speculative schema deltas withdrawn. D-05 added: Kyutai assumptions confirmed, flush trick adopted. Platform analysis moved to ADR-12 as non-normative. Q11–Q13 deferred and blocking nothing. Slice 4b removed from the prototype sequence. Still nothing implemented. |
+
+---
+
+## 12. Where to pick up
+
+Written so a cold session can start without re-deriving anything. This section
+describes **intent**, unlike the rest of this file; when it disagrees with the
+tables above, the tables are right.
+
+### Environment, from a clean container
+
+```bash
+# PostgreSQL is installed but not running in a fresh container
+pg_ctlcluster 16 main start
+su postgres -c "psql -c \"CREATE ROLE mosaique LOGIN PASSWORD 'mosaique' SUPERUSER;\""
+su postgres -c "createdb -O mosaique mosaique_test"
+su postgres -c "createdb -O mosaique mosaique"
+
+cd backend && uv venv && uv pip install -e ".[dev]"
+MOSAIQUE_TEST_DATABASE_URL="postgresql+asyncpg://mosaique:mosaique@localhost:5432/mosaique_test" uv run pytest -q
+
+cd ../frontend && npm install && npm test
+```
+
+Playwright's own browser download is blocked in the web sandbox, but a Chromium
+is already on disk. Both browser specs pass with:
+
+```bash
+export MOSAIQUE_CHROMIUM_PATH=/opt/pw-browsers/chromium
+export MOSAIQUE_HOST_TOKEN="$(cd ../backend && uv run python -m mosaique.app.seed | tail -1)"
+npx playwright test          # needs backend on :8000 and vite on :5173
+```
+
+### Slice 3 — what it has to deliver
+
+Sources: `docs/IMPLEMENTATION_PLAN.md` Slice 3 (scope and gate), tech spec §7.4
+(lifecycle), §8.3–8.4 (validation, queue, overload), §14.1 (the failure matrix
+the gate is written against), blueprint D-02 (idle close), R-1 (`audio.pause`),
+X-13 (`last_ack_sequence`).
+
+| # | Item | Spec | Status |
+|---|---|---|---|
+| 1 | `ping`/`pong`, stale socket after 30 s with no pong or frame | §7.4 | TODO |
+| 2 | 30 s reconnect grace: session and ASR kept alive, `hello` resumes in place, `hello.ok resume:true`, buffered frames accepted when `seq` continues | §7.4, X-13 | TODO |
+| 3 | Beyond the grace: ASR ended, open segment finalized, new AudioSession on reconnect, participant row reused | §7.4 | TODO |
+| 4 | `SESSION_REPLACED` actually closes the first socket | §7.4 | PARTIAL — Slice 1 sends the error; the close is unverified |
+| 5 | AudioSession closed after 30 s idle; resume opens a new one with a fresh anchor | D-02 | TODO |
+| 6 | `audio.pause` / `audio.resume` honoured rather than ignored | R-1 | TODO |
+| 7 | Queue policy: <25 normal, 25–62 `delayed` with `lag_ms`, full → frame skipped from the **ASR queue only**, `asr_frames_skipped`, `gap` segment over the skipped span; full >15 s → ASR closed, `unavailable`, audio still recorded | §8.4 | TODO |
+| 8 | `stream.status` message and the five UI states | §7.2 | TODO |
+| 9 | `seq` gap > 2 s inserts a `gap` marker | §8.3 | TODO |
+| 10 | DB unavailable while LIVE: buffer up to 200 segments, then `unavailable`; audio file continues | §14.1 | TODO |
+| 11 | Graceful shutdown on SIGTERM: stop joins, finalize open segments, close sockets 1012 | §14.1 | TODO |
+| 12 | Silent microphone: RMS ≈ 0 for 10 s → "no audio detected" | §8.2, §14.1 | TODO |
+
+Already done in earlier slices and only needing a named test against the
+matrix: mic permission denied (Slice 1 UI), host ends twice
+(`test_end_twice_yields_one_completed_meeting_and_one_job`), crash during
+FINALIZING (`test_startup_recovery_completes_a_stranded_finalizing_meeting`),
+LLM provider down (`tests/integration/test_intelligence_flow.py`).
+
+**Deliberately outside Slice 3:** real ASR, four participants, transcript
+search, the remaining §15 metrics.
+
+### The two things most likely to bite
+
+1. **Timeline rule (ADR-11).** Silence is judged in stream time, never wall
+   time. This bug has now been found twice — once in Slice 1, once in Slice 2
+   where the frame pump was still ticking the segmenter with audio *pushed*
+   rather than audio *transcribed*. Reconnect and pause/resume are exactly the
+   paths where it comes back, because both make audio arrive in bursts.
+   `test_ten_times_speed_produces_the_same_transcript_as_real_time` is the
+   regression test; keep it passing.
+2. **The replay harness is the tool for this slice.** It was built in Slice 2
+   for precisely this: `tools/replay` already drives N real WebSockets at a
+   speed factor. Slice 3's disconnect, duplicate-frame and stall scenarios
+   belong in the scenario format (tech spec §14.3 names "disconnect at t,
+   duplicate frames at t"), not in a bespoke test client.
+
