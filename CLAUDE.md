@@ -111,16 +111,51 @@ A slice is not finished until step 3 is done.
 
 ---
 
-## Current state (2026-09-06)
+## Current state (2026-09-07)
 
-Slices 0 and 1 are VERIFIED, browser flow included. Slice 2 is VERIFIED in
-software: `tools/replay` v1, the multi-participant runtime, and the participant
-panel. 137 tests: 85 backend unit, 32 backend integration against real
-PostgreSQL, 18 frontend unit, 2 Playwright specs. Everything in the speech path
-is a fake — no real audio has ever been transcribed by this system.
+**Slices 0 through 3 are VERIFIED and merged to `main`** (PR #1, PR #2). 181
+tests: 104 backend unit, 48 backend integration and realtime against real
+PostgreSQL, 27 frontend unit, 2 Playwright specs — plus a 60-minute accelerated
+run behind `-m slow` that passes at 54.8x realised with no memory growth.
 
-Two items on the Slice 2 gate are **not** done and are not claimed: the
-cross-network run between two physical machines (A-8), and Spike A. Both need
-hardware, not code. See `PROJECT_STATE.md` §9.
+The product spine works end to end on fakes, two participants merge into one
+attributed transcript in both browsers, and every row of the tech spec §14.1
+failure matrix that does not need a real model has a named passing test.
+**Everything in the speech path is still a fake — no real audio has ever been
+transcribed by this system.**
 
-Next: **the two field checks above, then Slice 3 — failure behavior.**
+Three things are open and none of them is code: the cross-network run (A-8),
+Spike A, and the GPU half of A-9. All need hardware.
+
+Next: **Slice 4 — real Kyutai**, blocked on Q2, Spike B and Spike C. It is also
+the slice that can invalidate earlier work, because every `[measure]` value has
+so far been tuned against a recognizer that emits a fixed script at a fixed
+delay. Start from `PROJECT_STATE.md` §12.
+
+---
+
+## Known traps
+
+Four mistakes this codebase has actually made. Each cost real debugging time
+and each is easy to repeat.
+
+**Stream time is not wall time.** Silence and segment boundaries are judged in
+stream time derived from frame counts (ADR-11), never against a clock. Broken
+twice: once in Slice 1, once in Slice 2 where the frame pump still ticked the
+segmenter with audio *pushed* rather than audio *transcribed*.
+
+**Per-participant tasks share runtime state.** Every pump runs concurrently and
+touches the same runtime objects, so anything mutated across an `await` needs a
+lock. The persistence buffer did not have one and silently dropped a segment
+that had already been broadcast — no error, no log, invisible to the fast suite.
+
+**Globs in `.gitignore` are not anchored.** A bare `audio/` also matched the
+source package `backend/src/mosaique/speech/audio/`, so `store.py` was never
+committed and a clean checkout could not import the app. Anchor runtime-data
+rules with a leading slash, and check `git check-ignore -v` when a file vanishes.
+
+**Never hold a socket open while doing slow work.** The server hangs up after
+30 s of silence (§7.4), and it is right to. The harness generated an hour of
+synthetic audio *after* connecting and looked exactly like a dead client;
+generate first, connect second, and yield inside any tight send loop.
+
