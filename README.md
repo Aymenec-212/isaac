@@ -2,15 +2,16 @@
 
 Realtime meeting intelligence, French-first.
 
-**Status: Slice 1 — one participant, end to end, on fakes.** You can create a
-meeting, open the invite link, accept the consent notice, grant the microphone,
-watch French text appear live and firm up into final segments, end the meeting,
-and read a summary with decisions and actions that cite real transcript
-segments. Every model in that path is a fake: `FakeRecognizer` and
-`FakeLLMProvider`. Real Kyutai arrives in Slice 4, a real provider in Slice 5.
+**Status: Slice 2 — two participants and the replay harness, on fakes.** Two
+people can join the same meeting from their own browsers and watch one merged
+transcript, each line under whoever said it, with a participant panel showing
+who is in the room and who is talking. Ending the meeting produces a summary
+with decisions and actions that cite real transcript segments. Every model in
+that path is a fake: `FakeRecognizer` and `FakeLLMProvider`. Real Kyutai
+arrives in Slice 4, a real provider in Slice 5.
 
-Not in this slice: a second participant, reconnect handling, `stream.status`,
-audio scrubbing, search, magic-link login.
+Not in this slice: reconnect handling, overload behaviour, `stream.status`,
+four participants, audio scrubbing, search, magic-link login.
 
 `PROJECT_STATE.md` is the only document that describes what actually exists.
 The Technical Specification is normative for what is being built.
@@ -69,7 +70,7 @@ Migrations and seeding run from the entrypoint before the server accepts traffic
 
 ```bash
 cd backend
-uv run pytest -q                       # 113 tests
+uv run pytest -q                       # 117 tests
 uv run pytest -m "not integration"     # unit only, no database needed
 uv run ruff check . && uv run ruff format .
 uv run mypy                            # strict
@@ -81,9 +82,34 @@ npm run typecheck && npm test && npm run build
 npx playwright install chromium && npm run test:e2e   # needs a running backend
 ```
 
-Regenerating the OpenAPI document is not optional: CI fails if the committed
-`frontend/openapi.json` differs from what the code produces, because a stale
-document means the typed client silently disagrees with the server.
+### The replay harness
+
+`tools/replay` drives N participant streams into the running gateway over real
+WebSockets, at a chosen speed factor, and writes a JSON report with per-segment
+latency. It is the tool for debugging anything realtime: a failure you can
+replay is a failure you can fix.
+
+```bash
+cd backend
+# a scenario is a timing script: who speaks, from when, out of which fixture
+uv run python -m tools.replay run tools/replay/scenarios/two-participants.json \
+  --host-token "$(uv run python -m mosaique.app.seed | tail -1)" \
+  --speed 10 --report /tmp/replay.json
+
+# fixtures are raw 24 kHz s16le mono; synthesise one, or point at a recording
+uv run python -m tools.replay make-fixture reunion.pcm --ms 20000
+```
+
+`--speed 10` replays twenty seconds of meeting in about five, and produces the
+same transcript as real time: segmentation is judged in stream time derived
+from frame counts (ADR-11), never against a wall clock. That equivalence is
+asserted by `test_ten_times_speed_produces_the_same_transcript_as_real_time`,
+and it is the property the harness lives or dies by.
+
+Regenerating the OpenAPI document is not optional: a stale
+`frontend/openapi.json` means the typed client silently disagrees with the
+server. This was meant to be a CI drift job, but there is no CI in this
+repository (`PROJECT_STATE.md` L-18), so run it yourself before pushing.
 
 ## Layout
 
@@ -94,23 +120,31 @@ backend/src/mosaique/
   app/api/        FastAPI routers
   app/auth/       tokens and the single authorization check
   persistence/    models, repositories, alembic migrations
-  realtime/       gateway, protocol, sessions, ingress   (Slice 1)
+  realtime/       gateway, protocol, sessions, ingress   (Slice 1, roster Slice 2)
   speech/         StreamingRecognizer + adapters          (Slice 1 fake, Slice 4 Kyutai)
   transcript/     segmenter                               (Slice 1)
   intelligence/   LLMProvider and output schema           (Slice 1 fake, Slice 5 real)
   jobs/           processor loop                          (Slice 1)
   observability/  structured logging, metrics
+backend/tools/
+  replay/         N-stream replay harness                 (Slice 2)
 frontend/src/
   api/            typed client generated from OpenAPI
-  meeting/        live view                               (Slice 1)
+  meeting/        live view, participant panel            (Slice 1, panel Slice 2)
+  realtime/       WS client, reconciler, roster           (Slice 1, roster Slice 2)
   review/         summary, decisions, actions             (Slice 1)
 ```
 
 Empty directories are deliberate: they are the module boundaries the
 specification defines, and they get filled in slice order.
 
-## What Slice 1 proves
+## What Slices 1 and 2 prove
 
+- Two participants in their own browsers see one merged transcript, correctly
+  attributed, and the two screens agree.
+- A replay at 10x produces the same transcript as one at 1x.
+- The runtime learns who is in a meeting from ingress events, never from the
+  transport — it cannot count sockets even if it wanted to.
 - Audio captured in a browser becomes an attributed French transcript live.
 - Interim text is visibly provisional; only final segments are persisted.
 - `POST /end` twice yields one COMPLETED meeting and one intelligence job.
@@ -133,3 +167,7 @@ cd frontend && npm run dev
 Create a meeting, click the invite link it prints, accept the consent notice,
 and speak. The fake recognizer emits a scripted French conversation keyed to
 how much audio it has received, so the transcript is deterministic.
+
+For a second participant, open the same invite link in another browser profile
+or a private window and join under a different name. Both windows should show
+the same transcript with each line attributed to its speaker.

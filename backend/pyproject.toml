@@ -24,6 +24,10 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "psycopg[binary]>=3.2",
+    # The replay harness drives the gateway over a real socket, so it needs a
+    # real client. It arrives transitively via uvicorn[standard]; naming it
+    # here keeps the harness working if that ever changes.
+    "websockets>=13.0",
 ]
 
 [build-system]
@@ -51,8 +55,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "TID"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-mypy_path = "src"
-packages = ["mosaique"]
+mypy_path = "src:."
+packages = ["mosaique", "tools.replay"]
 plugins = []
 
 [[tool.mypy.overrides]]
@@ -64,5 +68,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
-pythonpath = ["src"]
+# "." puts `tools.replay` on the path: the harness is exercised by the
+# integration suite, not only by hand.
+pythonpath = ["src", "."]
 markers = ["integration: requires PostgreSQL"]

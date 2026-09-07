@@ -160,7 +160,11 @@ class SegmentRepository:
                 TranscriptSegment.meeting_id == meeting_id,
                 TranscriptSegment.organization_id == self._organization_id,
             )
-            .order_by(TranscriptSegment.start_ms, TranscriptSegment.sequence)
+            .order_by(
+                TranscriptSegment.start_ms,
+                TranscriptSegment.participant_id,
+                TranscriptSegment.sequence,
+            )
         )
         return (await self._session.execute(stmt)).scalars().all()
 

@@ -321,6 +321,43 @@ input[type="text"] {
   color: var(--azure) !important;
 }
 
+/* The participant panel. One tessera per person, lit while they speak — the
+   same 8px mosaic motif the connection state uses, so "live" reads the same
+   way wherever it appears. */
+.roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.roster-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--grout);
+  border-radius: var(--tile);
+  font-size: 14px;
+}
+
+.roster-entry[data-speaking="true"] {
+  border-color: var(--verdigris);
+}
+
+.roster-entry[data-present="false"] .roster-name {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.roster-tag {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
 .statusbar {
   display: flex;
   align-items: center;

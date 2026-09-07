@@ -74,9 +74,24 @@ class TranscriptSegmentFinal(BaseModel):
 
 
 class ParticipantEvent(BaseModel):
+    """Roster changes. Derived from ingress events, never from socket counts."""
+
     type: Literal["participant.joined", "participant.left"]
     participant_id: str
     display_name: str
+
+
+class ParticipantSpeaking(BaseModel):
+    """Who is talking right now.
+
+    Derived from the segmenter — a participant is speaking while they have an
+    open segment — so it is a statement about recognized speech rather than
+    about microphone level, and it costs no extra signal on the wire.
+    """
+
+    type: Literal["participant.speaking"] = "participant.speaking"
+    participant_id: str
+    speaking: bool
 
 
 class MeetingStateMessage(BaseModel):
