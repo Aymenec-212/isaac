@@ -72,21 +72,29 @@ uv venv && uv pip install -e ".[dev]"
 uv run alembic upgrade head
 uv run python -m mosaique.app.seed            # prints a host token
 uv run uvicorn mosaique.app.main:create_app --factory --reload --port 8000
-uv run pytest -q                              # 113
+uv run pytest -q                              # 117
 uv run pytest -q -m "not integration"         # 85, no database needed
 uv run ruff check . && uv run ruff format .
 uv run mypy                                   # strict
 uv run python tools/export_openapi.py ../frontend/openapi.json
+
+# replay harness (from backend/, against a running server)
+uv run python -m tools.replay run tools/replay/scenarios/two-participants.json \
+  --host-token "$(uv run python -m mosaique.app.seed | tail -1)" --speed 10
 
 # frontend (from frontend/)
 npm install && npm run dev
 npm run generate:api                          # regenerate typed client
 npm run typecheck && npm test && npm run build
 npm run test:e2e                              # Playwright, needs a running backend
+                                              # MOSAIQUE_CHROMIUM_PATH overrides the browser
 ```
 
-CI fails if the committed `frontend/openapi.json` differs from what the code
-produces. Regenerate it whenever an API route or schema changes.
+Regenerate `frontend/openapi.json` whenever an API route or schema changes: a
+stale document means the generated client silently disagrees with the server.
+This was meant to be enforced by a CI drift job, but **there is no CI in this
+repository** — no `.github/` directory exists (L-18) — so the check is yours to
+run before you push.
 
 ---
 
@@ -105,9 +113,14 @@ A slice is not finished until step 3 is done.
 
 ## Current state (2026-09-06)
 
-Slices 0 and 1 are VERIFIED, browser flow included. 122 tests: 85 backend unit,
-28 backend integration against real PostgreSQL, 8 frontend unit, 1 Playwright
-e2e. Everything in the speech path is a fake — no real audio has ever been
-transcribed by this system.
+Slices 0 and 1 are VERIFIED, browser flow included. Slice 2 is VERIFIED in
+software: `tools/replay` v1, the multi-participant runtime, and the participant
+panel. 137 tests: 85 backend unit, 32 backend integration against real
+PostgreSQL, 18 frontend unit, 2 Playwright specs. Everything in the speech path
+is a fake — no real audio has ever been transcribed by this system.
 
-Next: **Slice 2 — two participants and the replay harness.**
+Two items on the Slice 2 gate are **not** done and are not claimed: the
+cross-network run between two physical machines (A-8), and Spike A. Both need
+hardware, not code. See `PROJECT_STATE.md` §9.
+
+Next: **the two field checks above, then Slice 3 — failure behavior.**

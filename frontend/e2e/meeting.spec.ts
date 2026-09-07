@@ -6,25 +6,18 @@
  * deterministic and headless. The backend must be running with the fake
  * recognizer and fake LLM provider (the default configuration).
  *
- * STATUS: written, NOT YET EXECUTED in CI. Recorded as such in
- * PROJECT_STATE.md — the browser binaries are not installed in the current
- * environment, so this file is unverified until someone runs it.
+ * Needs the app running: the backend on :8000 and the dev server on :5173.
  *
- *   npx playwright install chromium
- *   npx playwright test
+ *   npx playwright install chromium   # or set MOSAIQUE_CHROMIUM_PATH
+ *   MOSAIQUE_HOST_TOKEN="$(cd ../backend && uv run python -m mosaique.app.seed | tail -1)" \
+ *     npx playwright test
  */
 import { expect, test } from "@playwright/test";
+import { chromiumLaunch, isolateFromCdns } from "./launch";
 
-test.use({
-  launchOptions: {
-    args: [
-      "--use-fake-ui-for-media-stream",
-      "--use-fake-device-for-media-stream",
-      "--autoplay-policy=no-user-gesture-required",
-    ],
-  },
-  permissions: ["microphone"],
-});
+test.use({ launchOptions: chromiumLaunch, permissions: ["microphone"] });
+
+test.beforeEach(async ({ context }) => isolateFromCdns(context));
 
 test("a host can run a meeting end to end and read the review page", async ({ page }) => {
   const hostToken = process.env.MOSAIQUE_HOST_TOKEN;

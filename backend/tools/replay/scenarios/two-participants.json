@@ -1,0 +1,8 @@
+{
+  "title": "Deux participants",
+  "speed": 1.0,
+  "participants": [
+    { "display_name": "Amina", "start_ms": 0, "synthetic_ms": 20000, "seed": 1 },
+    { "display_name": "Bruno", "start_ms": 1600, "synthetic_ms": 20000, "seed": 5 }
+  ]
+}
