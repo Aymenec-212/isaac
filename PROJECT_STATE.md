@@ -1,13 +1,14 @@
 # PROJECT_STATE.md
 
 **Project:** Mosaïque — realtime meeting intelligence, French-first
-**Last updated:** 2026-09-07 (rev 7 — Slice 2 merged; Slice 3 in progress)
-**Updated by:** Slice 3 implementation
-**Current slice:** **Slice 3 — failure behavior. IN PROGRESS.** Slice 2 is merged to
-`main` (PR #1) and VERIFIED, browser specs included. Two Slice 2 exit-gate items
-remain open because they need hardware, not code: the cross-network run (A-8)
-and Spike A.
-**Maturity level (skill §41):** Level 1 — functional prototype, multi-participant, fake models
+**Last updated:** 2026-09-07 (rev 9 — Slice 3 merged)
+**Updated by:** Slice 3 close-out
+**Current slice:** **None in progress. Slice 3 is merged (PR #2) and VERIFIED.**
+Next is Slice 4 — real Kyutai. Three items are open across Slices 2 and 3 and
+none of them is code: the cross-network run (A-8), Spike A, and the GPU half of
+A-9. All three need hardware this environment does not have.
+**Maturity level (skill §41):** Level 1 — functional prototype, multi-participant,
+fake models, failure behavior covered
 
 ---
 
@@ -37,12 +38,16 @@ The PRD says what the product should do. The technical specification says how it
 | `BLOCKED` | Cannot proceed. Blocker named. |
 | `REMOVED` | Was built, then taken out. Reason recorded. |
 
-**Slices 0, 1 and 2 are VERIFIED, browser specs included (L-12 closed). Slice 2
-merged to `main` as PR #1 on 2026-09-07; both Playwright specs were re-run
-locally by the maintainer against a real browser and passed. Two items on the
-Slice 2 gate are NOT done and are not claimed: a cross-network run between two
-physical machines (A-8), and Spike A — both need hardware. Slice 3 is
-IN PROGRESS. Everything from Slice 4 onward is still `SPECIFIED`.**
+**Slices 0 through 3 are VERIFIED and merged to `main` — PR #1 (Slice 2) and
+PR #2 (Slice 3), both on 2026-09-07. The browser specs were re-run locally by
+the maintainer against a real browser and passed (L-12 closed). Slice 3's exit
+gate is met: every row of the tech spec §14.1 failure matrix that does not need
+a real model has a named passing test, and the accelerated hour passes.**
+
+**Three things are NOT done and are not claimed, none of them code:** a
+cross-network run between two physical machines (A-8), Spike A, and the GPU
+half of A-9. **Everything from Slice 4 onward is still `SPECIFIED`, and no real
+audio has ever been transcribed by this system.**
 
 ---
 
@@ -50,15 +55,15 @@ IN PROGRESS. Everything from Slice 4 onward is still `SPECIFIED`.**
 
 | Field | Value |
 |---|---|
-| Repository | `main` through PR #1 (Slice 2). Work branch `claude/awesome-ritchie-iu6uut`, restarted from `main` |
+| Repository | `main` through PR #2 (Slice 3). Work branch `claude/awesome-ritchie-iu6uut`, restarted from `main` after each merge |
 | Runnable | yes — `docker compose up`, or uv + local PostgreSQL |
 | Deployed | no |
 | Real audio ever transcribed by this system | **no — every model in the path is a fake** |
-| Tests passing | **180**: 103 backend unit, 48 backend integration and realtime (real PostgreSQL), 27 frontend unit, 2 Playwright browser specs. Plus one opt-in accelerated hour behind `-m slow` |
+| Tests passing | **181**: 104 backend unit, 48 backend integration and realtime (real PostgreSQL), 27 frontend unit, 2 Playwright browser specs. Plus one opt-in accelerated hour behind `-m slow` |
 | Lint / types | ruff clean; mypy strict clean on 73 source files (the harness included); `tsc --noEmit` clean |
 | Known gap | A-8 unvalidated: every run so far is loopback on one machine. Spike A not run. **No CI runs on this repository** — see L-18. |
-| Next action | Slice 3 — failure behavior (in progress; see §12) |
-| Next gate | Slice 3 exit: the tech spec §14.1 failure matrix, a passing test per row that needs no real model |
+| Next action | **Slice 4 — real Kyutai.** Blocked on Q2, Spike B and Spike C (see §3, and the plan's spike table) |
+| Next gate | Slice 4 exit: a 3-minute French fixture replayed at real time against the real model, with WER and p95 first-word latency measured and written into §8 |
 
 ---
 
@@ -233,6 +238,8 @@ Mirrors blueprint §5. Status here is the live one.
 | A-9 | 30 s ASR grace does not leak GPU memory | Shorten grace | Slice 3 | **PARTIAL** — `test_an_hour_of_meeting_does_not_grow_the_runtime` measures 0.0 MB of tracked growth across an accelerated hour on the *fake* recognizer. There is no GPU in the path yet, so the GPU half is still open until Slice 4 |
 | A-10 | French WER is good enough to be useful | Model swap | Slice 4 | UNVALIDATED |
 | A-11 | "Joining is consent" satisfies FR/EU law | Consent flow and DPA change | legal counsel | **UNVALIDATED — not an engineering question** |
+| A-14 | Slice 3's thresholds hold against a recognizer whose timing is not a fixed script | Reconnect grace, idle close, overload window and gap threshold all need retuning together | Slice 4 | **UNVALIDATED.** Every one of them has only ever been exercised against `FakeRecognizer`, which emits a scripted line at a fixed delay. A real model's jitter is the thing these values exist to absorb, and none of it has been seen yet |
+| A-15 | Per-participant runtime tasks do not corrupt shared state | A concurrency bug that no fast test can see | Slice 3 | **PARTIALLY VALIDATED, and it already failed once.** The persistence buffer was shared across participant pumps and dropped a broadcast segment; found by the two-stream accelerated hour, not by the unit suite. Other shared runtime state — the roster, `_stream_status`, `_file_frames` — is mutated from the same tasks and has no equivalent test |
 | A-13 | A participant's place on the meeting timeline may be anchored to the server clock at connect | A replay cannot reproduce a staggered join; joins would need to be frame-derived too | Slice 2 | **CONFIRMED as a property, not a guess** — see L-15. Segmentation is frame-derived and speed-invariant; the join anchor is not |
 
 ---
@@ -254,7 +261,9 @@ Every `[measure]` placeholder in the technical specification. A value here means
 | Outputs ready after end | 90 s | guess | UNMEASURED |
 | Queue depth: normal / lagging / full | 25 / 62 frames | guess | UNMEASURED |
 | Sustained-overload stream failure | 15 s | guess | UNMEASURED |
-| Idle timeout closing AudioSession | 30 s | derived from D-02 | UNMEASURED |
+| Idle timeout closing AudioSession | 30 s | derived from D-02 | UNMEASURED. Exercised by `test_idle_and_pause.py` at a shortened value; the 30 s itself is still a guess |
+| Segments held while the database is unreachable | 200 | guess (tech spec 14.1) | UNMEASURED. Nobody has measured how long 200 segments buys, or what a real outage lasts |
+| Missing-frame run that earns a gap marker | 2 000 ms | guess (tech spec 8.3) | UNMEASURED. Below it a lost packet is padded silently; the threshold has only been exercised against fixed-size synthetic gaps |
 | Concurrent streams per GPU | ~400/H100 (vendor figure) | Kyutai docs | UNCONFIRMED ON OUR HARDWARE |
 | Replay realised speedup at `--speed 10` | 4.17x — 20 s of stream in 4.8 s wall | `tools/replay`, 2 streams, 2026-09-06 | MEASURED. The ceiling is the harness pacing and loopback, not the runtime |
 | First-word latency p95, 1x, 2 participants | 915 ms | replay report, 2026-09-06 | MEASURED — **fake recognizer over loopback**. Dominated by the fake's 500 ms scripted model delay. Not the NFR and not a prediction of it |
@@ -327,6 +336,7 @@ Current, as of planning. Each is a deliberate choice, not an oversight.
 | 2026-09-03 | rev 2. Platform research folded into prototype scope. **Reverted in rev 3 as scope creep.** |
 | 2026-09-06 | **rev 5. Slice 1 complete.** Full spine on fakes: WS gateway, `MeetingIngress` seam, ParticipantSession with the ADR-11 timeline, pure segmenter, evidence-validated intelligence, job processor with retries, and the browser UI (worklet, WS client, reconciler, join/live/review). 121 tests. Four bugs found by the tests and fixed: an `AudioSession` id mismatch breaking every segment insert; a frame pump that starved the reader; a cancelled `anext` silently killing the event stream; and silence detection comparing stream time against wall time, which fabricated segment breaks whenever audio arrived faster than real time. One test-isolation bug fixed: jobs leaked between tests, so the processor claimed a previous test's work. |
 | 2026-09-05 | rev 4. Slice 0 complete and VERIFIED.** Repo initialised (uv, not pip). Migration `0001` creates all eight tables. `POST/GET /meetings`, `GET /meetings/{id}`, `/livez`. React app with an OpenAPI-generated typed client. 46 tests, ruff clean, mypy strict clean. CI added, including a contract-drift job that fails when the committed OpenAPI document does not match the code. One contract gap found and fixed during the slice: the error envelope was in the spec but absent from OpenAPI, so the generated client could not type it. |
+| 2026-09-07 | **rev 9. Slice 3 merged as PR #2.** Exit gate met: every §14.1 failure-matrix row that needs no real model has a named passing test, and the accelerated hour passes at 54.8x realised with 0.0 MB of tracked growth. 181 tests. Four bugs were found getting the hour to pass, and the split is the point: three were the harness's own — it never answered server pings, its send loop starved the reader that would have, and it generated an hour of synthetic audio *after* opening the socket, so the server saw a client that connected and went silent for 30 s. The fourth was real and would have shipped silently: concurrent pumps sharing one persistence buffer could drop a segment that had already been broadcast, with nothing logged as failed. Its regression test was checked against the original code and fails there with the same symptom. Still open, none of it code: A-8, Spike A, and the GPU half of A-9. |
 | 2026-09-07 | **rev 8. Slice 3 — failure behavior.** Reconnect grace with sequence resume; ping/pong and stale-socket detection; `audio.pause`/`audio.resume` and the D-02 idle close; the §8.4 overload policy with gap segments and `stream.status`; segment buffering when the database is unreachable; graceful drain on shutdown; client-side reconnect with a bounded buffer, and the silent-microphone warning. The harness gained the fault injection §14.3 asks for. Three bugs found while building it: `participant.speaking` shipped in Slice 2 with the wrong field name for the spec; a participant whose stream was idle-closed and then disconnected was never announced as left; and the harness itself never answered server pings, which killed the first accelerated-hour run. |
 | 2026-09-07 | **rev 7.** Slice 2 merged to `main` as PR #1. Both Playwright specs re-run locally by the maintainer against a real browser and passed, which is what moves Slice 2 from "verified in this sandbox" to verified. `__pycache__` untracked (L-17 narrowed to `node_modules` alone). §12 "Where to pick up" added so a cold session can start without re-deriving the environment or the Slice 3 scope. Slice 3 begun. |
 | 2026-09-06 | rev 6a. Correction, not new work: **the CI that rev 4 claimed does not exist.** No `.github/` on `main` or any branch, not gitignored, and PR #1 reports zero check runs. Recorded as L-18. Every "passes" in rev 6 below was measured locally in this session and is not enforced anywhere. |
@@ -365,60 +375,67 @@ export MOSAIQUE_HOST_TOKEN="$(cd ../backend && uv run python -m mosaique.app.see
 npx playwright test          # needs backend on :8000 and vite on :5173
 ```
 
-### Slice 3 — what it delivered
+### Slice 3 — delivered and merged (PR #2)
 
-Sources: `docs/IMPLEMENTATION_PLAN.md` Slice 3, tech spec §7.4 (lifecycle),
-§8.3–8.4 (validation, queue, overload), §14.1 (the failure matrix the gate is
-written against), blueprint D-02 (idle close), R-1 (`audio.pause`), X-13
-(`last_ack_sequence`).
+Every item, with the test that proves it. All of `tests/realtime/` is new.
 
-| # | Item | Spec | Status |
+| # | Item | Spec | Evidence |
 |---|---|---|---|
-| 1 | `ping`/`pong`, stale socket after 30 s | §7.4 | **VERIFIED** — `test_transport_health.py` |
-| 2 | 30 s reconnect grace, resume in place, buffered frames accepted | §7.4, X-13 | **VERIFIED** — `test_reconnect.py` |
-| 3 | Beyond the grace: finalize, new AudioSession on reconnect | §7.4 | **VERIFIED** — same file |
-| 4 | `SESSION_REPLACED` closes the first socket | §7.4 | **VERIFIED** — same file |
-| 5 | AudioSession closed after 30 s idle, fresh anchor on resume | D-02 | **VERIFIED** — `test_idle_and_pause.py` |
-| 6 | `audio.pause` / `audio.resume` honoured | R-1 | **VERIFIED** — same file |
-| 7 | Queue policy: delayed with `lag_ms`, skip from the ASR queue only, gap segment, `unavailable` past 15 s | §8.4 | **VERIFIED** — `test_overload_policy.py`, `test_stream_status.py` |
-| 8 | `stream.status` and the five UI states | §7.2 | **VERIFIED** — `test_stream_status.py`; the UI half is in `LiveMeeting.tsx` and unasserted (see below) |
-| 9 | `seq` gap > 2 s inserts a gap marker | §8.3 | **VERIFIED** — `test_gaps.py` |
-| 10 | DB unavailable: buffer 200, then `unavailable`, audio continues | §14.1 | **VERIFIED** — `test_degraded_persistence.py` |
-| 11 | Graceful drain: stop joins, finalize, close 1012 | §14.1 | **VERIFIED** — `test_graceful_shutdown.py` |
-| 12 | Silent microphone → "no audio detected" | §8.2 | **VERIFIED (logic)** — `silence.test.ts`; the banner itself is unasserted |
+| 1 | `ping`/`pong`, stale socket after 30 s | §7.4 | `test_transport_health.py` (2) |
+| 2 | 30 s reconnect grace, resume in place, buffered frames accepted | §7.4, X-13 | `test_reconnect.py` (4) |
+| 3 | Beyond the grace: finalize, new AudioSession on reconnect | §7.4 | same file |
+| 4 | `SESSION_REPLACED` closes the first socket | §7.4 | same file |
+| 5 | AudioSession closed after 30 s idle, fresh anchor on resume | D-02 | `test_idle_and_pause.py` (3) |
+| 6 | `audio.pause` / `audio.resume` honoured | R-1 | same file |
+| 7 | Queue policy: `delayed` with `lag_ms`, skip from the ASR queue only, gap segment, `unavailable` past 15 s | §8.4 | `test_overload_policy.py` (10), `test_stream_status.py` (5) |
+| 8 | `stream.status` and the five states | §7.2 | `test_stream_status.py` |
+| 9 | `seq` gap > 2 s inserts a gap marker | §8.3 | `test_gaps.py` (2) |
+| 10 | DB unavailable: hold, then `unavailable`, audio continues | §14.1 | `test_degraded_persistence.py` (4) |
+| 11 | Graceful drain: stop joins, finalize, close 1012 | §14.1 | `test_graceful_shutdown.py` (2) |
+| 12 | Silent microphone → "no audio detected" | §8.2 | `silence.test.ts` (5) |
+| 13 | Fault injection in the harness: disconnect at t, duplicate frames at t | §14.3 | `test_failure_matrix.py` (3) |
+| 14 | 60-minute accelerated run | §14.2 | `test_long_run.py`, behind `-m slow` |
 
 **Not covered, and worth knowing before Slice 4:**
 
 * The `stream.status` *UI* is wired but no browser test asserts what a
-  participant actually sees in each of the five states. The mapping is tested;
-  the rendering is not.
+  participant sees in each of the five states. The mapping is tested; the
+  rendering is not.
 * `participant.reconnecting` is broadcast but nothing asserts a client acts
   on it.
-* Sustained overload is proven at the policy level, not by actually saturating
-  a real queue through the gateway — forcing that through a socket tests the
-  event loop more than the rule.
-* A-9's GPU half stays open: the accelerated hour measures 0.0 MB of growth,
-  but there is no GPU in the path until Slice 4.
+* Sustained overload is proven at the policy level, not by saturating a real
+  queue through the gateway.
+* Concurrency has thin coverage in the fast suite — see A-15. The one bug found
+  there was found by the hour-long test, not by the 152 that run in a minute.
 
-### The two things most likely to bite
+### Slice 4 — what comes next
 
-1. **Timeline rule (ADR-11).** Silence is judged in stream time, never wall
-   time. This bug has now been found twice — once in Slice 1, once in Slice 2
-   where the frame pump was still ticking the segmenter with audio *pushed*
-   rather than audio *transcribed*. Reconnect and pause/resume are exactly the
-   paths where it comes back, because both make audio arrive in bursts.
-   `test_ten_times_speed_produces_the_same_transcript_as_real_time` is the
-   regression test; keep it passing.
-2. **The replay harness is a client, and owes the server what a client owes.**
-   Slice 3 added `disconnect_at_ms` and `duplicate_at_ms` to the scenario
-   format, per §14.3. It also learned the hard way that the harness must
-   answer server pings: the first accelerated-hour run died at
-   `1001 (going away)` after the audio stopped and the server correctly
-   declared a one-way socket dead. Any new client — a load generator, a
-   monitoring probe — has the same obligation.
+Read `docs/IMPLEMENTATION_PLAN.md` Slice 4 and tech spec §9.2 before starting.
+In short: apply Spike B's findings to §8.1 and §9.3 *before* writing the
+adapter, build the `asr-runtime` container, put Kyutai behind
+`StreamingRecognizer` with bounded reconnect backoff and `health()`, add the
+full latency decomposition, and tune the segmentation thresholds against real
+French audio with the replay harness.
 
-3. **Next is Slice 4, and it is the one that can invalidate things.** Real
-   Kyutai replaces `FakeRecognizer`, and every `[measure]` value in §8 is
-   currently tuned against a fake that emits a fixed script at a fixed delay.
-   The segmentation thresholds in particular have never seen real speech.
+**It is blocked on Q2, Spike B and Spike C** — none of which is code, and all
+of which are recorded as open in §3 and in the plan's spike table. Do not start
+the adapter before Spike B: it is the only thing that can still break the §9.2
+decision, and if `moshi-server` cannot serve concurrent independent streams the
+adapter goes in-process instead.
 
+**This is the slice that can invalidate earlier work.** Every `[measure]` value
+in §8 has so far been tuned against a recognizer that emits a fixed script at a
+fixed delay (A-14). If French WER on real meeting audio turns out unusable,
+ADR-03 reopens — §10 calls that the largest technical risk left in the
+prototype.
+
+### Traps
+
+Four mistakes this project has actually made, each more than once in spirit,
+are written up in `CLAUDE.md` under **Known traps**: stream time versus wall
+time, shared runtime state across participant tasks, unanchored globs in
+`.gitignore`, and holding a socket open while doing slow work.
+
+Read them before touching the realtime path. The regression test for the first
+is `test_ten_times_speed_produces_the_same_transcript_as_real_time`; for the
+second, `test_two_pumps_persisting_at_once_lose_nothing`. Keep both passing.
