@@ -34,6 +34,9 @@ class ParticipantRecord:
     start_ms: int
     frames_sent: int
     speaking_transitions: int = 0
+    disconnects: int = 0
+    duplicates_sent: int = 0
+    resumed: bool = False
 
 
 @dataclass(frozen=True)

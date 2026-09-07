@@ -71,4 +71,11 @@ testpaths = ["tests"]
 # "." puts `tools.replay` on the path: the harness is exercised by the
 # integration suite, not only by hand.
 pythonpath = ["src", "."]
-markers = ["integration: requires PostgreSQL"]
+markers = [
+    "integration: requires PostgreSQL",
+    "slow: minutes, not seconds; run deliberately with `-m slow`",
+]
+# A marker does not deselect on its own. Without this the accelerated-hour test
+# runs on every `pytest -q` and turns a one-minute suite into a twenty-minute
+# one. `-m slow` on the command line overrides this and selects it.
+addopts = ["-m", "not slow"]

@@ -48,13 +48,42 @@ class IngressAudioFrame:
 
 
 @dataclass(frozen=True)
+class ParticipantAudioState:
+    """The participant muted or unmuted (tech spec 7.1, blueprint R-1).
+
+    Transport-neutral on purpose: the runtime learns that this person's audio
+    is intentionally absent, not that a particular button was pressed. Without
+    it a mute is indistinguishable from a network stall, and the status bar
+    would cry wolf at someone who simply muted themselves.
+    """
+
+    participant_id: str
+    paused: bool
+
+
+@dataclass(frozen=True)
 class IngressError:
     participant_id: str | None
     code: str
     message: str
 
 
-IngressEvent = ParticipantJoined | ParticipantLeft | IngressAudioFrame | IngressError
+IngressEvent = (
+    ParticipantJoined | ParticipantLeft | ParticipantAudioState | IngressAudioFrame | IngressError
+)
+
+
+@dataclass(frozen=True)
+class ResumeInfo:
+    """What a `hello` needs to know about an existing stream (tech spec 7.4).
+
+    The only thing the transport may ask the runtime, and it asks nothing about
+    sockets: whether this participant's stream is still alive, and how far its
+    frame sequence got.
+    """
+
+    resuming: bool
+    last_sequence: int
 
 
 @runtime_checkable

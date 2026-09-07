@@ -27,8 +27,17 @@ class Hello(BaseModel):
 
 
 class Ping(BaseModel):
+    """Travels in both directions.
+
+    §7.1 lists `ping` as client to server and §7.2 lists only `pong` coming
+    back, but §7.4 says the *server* pings every 10 s and calls a socket dead
+    after 30 s with no pong. Both halves are needed — a suspended tab stops
+    sending without ever closing the connection — so the same message shape
+    serves both, and `type` carries a default so the server can build one.
+    """
+
     v: Literal[1] = 1
-    type: Literal["ping"]
+    type: Literal["ping"] = "ping"
     t: int
 
 
@@ -74,9 +83,14 @@ class TranscriptSegmentFinal(BaseModel):
 
 
 class ParticipantEvent(BaseModel):
-    """Roster changes. Derived from ingress events, never from socket counts."""
+    """Roster changes. Derived from ingress events, never from socket counts.
 
-    type: Literal["participant.joined", "participant.left"]
+    `participant.reconnecting` is the reconnect grace made visible: the stream
+    is still open server-side and its ASR session is still alive, so the panel
+    says "reconnecting" rather than removing the person (tech spec 7.4).
+    """
+
+    type: Literal["participant.joined", "participant.left", "participant.reconnecting"]
     participant_id: str
     display_name: str
 
@@ -91,7 +105,26 @@ class ParticipantSpeaking(BaseModel):
 
     type: Literal["participant.speaking"] = "participant.speaking"
     participant_id: str
-    speaking: bool
+    active: bool
+
+
+class StreamStatus(BaseModel):
+    """How one participant's audio is being handled right now (tech spec 8.4).
+
+    The five states are a promise about *audio*, not about the socket:
+
+    * `listening` — the stream is open and paused, or no frames are arriving;
+    * `receiving` — frames arrive but nothing has been transcribed yet;
+    * `transcribing` — the normal state, queue below the lagging threshold;
+    * `delayed` — the queue is backing up; `lag_ms` says by how much;
+    * `unavailable` — nothing is being transcribed, and the client must say so
+      plainly because audio *is* still being recorded.
+    """
+
+    type: Literal["stream.status"] = "stream.status"
+    participant_id: str
+    status: Literal["listening", "receiving", "transcribing", "delayed", "unavailable"]
+    lag_ms: int = 0
 
 
 class MeetingStateMessage(BaseModel):

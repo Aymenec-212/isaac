@@ -1,7 +1,10 @@
-"""Metrics for Slice 1 (blueprint R-9).
+"""Metrics for Slices 1-3 (blueprint R-9).
 
-Four only. The other twenty from tech spec 15 arrive in Slice 6, each with a
-stated reason. Instrumenting everything now would be guessing at what matters.
+Four in Slice 1, plus one Slice 3 adds because the overload policy is
+unobservable without it: a stream that skips frames looks identical to a quiet
+one from the outside. The other twenty from tech spec 15 arrive in Slice 6,
+each with a stated reason. Instrumenting everything now would be guessing at
+what matters.
 """
 
 from __future__ import annotations
@@ -33,6 +36,16 @@ class Metrics:
     audio_frames_received_total: int = 0
     audio_frames_rejected_total: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     meetings_completed_total: int = 0
+    asr_frames_skipped_total: int = 0
+
+    def frames_skipped(self, count: int) -> None:
+        """Frames dropped from the ASR queue under overload (tech spec 8.4).
+
+        Counted separately from `audio_frames_rejected`: a rejected frame was
+        never valid, whereas a skipped one was good audio the recognizer could
+        not keep up with. It is still on disk.
+        """
+        self.asr_frames_skipped_total += count
 
     def frame_received(self) -> None:
         self.audio_frames_received_total += 1
@@ -51,6 +64,7 @@ class Metrics:
             "audio_frames_received_total": self.audio_frames_received_total,
             "audio_frames_rejected_total": dict(self.audio_frames_rejected_total),
             "meetings_completed_total": self.meetings_completed_total,
+            "asr_frames_skipped_total": self.asr_frames_skipped_total,
             "transcript_first_word_latency_ms_p95": (
                 self.transcript_first_word_latency_ms.percentile(0.95)
             ),

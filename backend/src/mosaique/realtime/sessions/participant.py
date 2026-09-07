@@ -7,6 +7,7 @@ timeline arithmetic, and the segmenter for this participant's stream.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 
 from mosaique.speech.interfaces import (
@@ -20,6 +21,15 @@ from mosaique.transcript.segmenter import Segmenter
 # Tech spec 8.4. Both values are [measure]; Slice 6 tunes them under real load.
 QUEUE_LAGGING_FRAMES = 25  # ~2 s
 QUEUE_MAX_FRAMES = 62  # ~5 s
+
+# Tech spec 8.4: a stream that has been at the queue ceiling for this long is
+# not going to catch up. The ASR session is closed and the stream reported
+# `unavailable`; audio keeps being recorded either way. [measure]
+OVERLOAD_FAILURE_S = 15.0
+
+# Tech spec 8.3: a run of missing frames longer than this is marked in the
+# transcript rather than quietly padded with silence.
+GAP_MARKER_MS = 2_000
 
 # A seq gap wider than this is a genuine outage rather than a lost packet, and
 # padding it would write minutes of silence. Slice 3 closes the AudioSession
@@ -57,6 +67,19 @@ class ParticipantSession:
 
         self._queue: asyncio.Queue[QueuedFrame | None] = asyncio.Queue(maxsize=QUEUE_MAX_FRAMES)
         self._last_seq: int | None = None
+        # Transport state. The stream outlives its socket for the length of the
+        # reconnect grace (tech spec 7.4), so "connected" is a property of this
+        # session rather than of whether a socket object exists.
+        self.connected = True
+        # Muted on purpose, rather than silent by accident (blueprint R-1).
+        self.paused = False
+        self._last_frame_at = time.monotonic()
+        # Overload bookkeeping (tech spec 8.4). `_skipped_from` is the first
+        # sequence dropped from the ASR queue in the current run of overload;
+        # the span it opens becomes one gap segment when the pressure lifts.
+        self.frames_skipped = 0
+        self._skipped_from: int | None = None
+        self._overloaded_since: float | None = None
         self.frames_received = 0
         self.frames_missing = 0
         self.frames_dropped = 0
@@ -93,15 +116,70 @@ class ParticipantSession:
             self.frames_missing += seq - self._last_seq - 1
         self._last_seq = seq
         self.frames_received += 1
+        self._last_frame_at = time.monotonic()
 
         try:
             self._queue.put_nowait(QueuedFrame(seq=seq, pcm=pcm, received_at_ms=received_at_ms))
         except asyncio.QueueFull:
-            # Slice 1 counts the loss. Slice 3 adds the visible `gap` segment
-            # and the `stream.status` transitions that go with it.
+            # Tech spec 8.4: the frame leaves the ASR queue, not the audio file.
+            # The caller writes it to disk regardless, so the span stays
+            # recoverable even though it will never be transcribed.
             self.frames_dropped += 1
+            self.frames_skipped += 1
+            if self._skipped_from is None:
+                self._skipped_from = seq
+                self._overloaded_since = time.monotonic()
             return False
+        if self._skipped_from is not None:
+            self._overloaded_since = None
         return True
+
+    def take_skipped_span(self) -> tuple[int, int] | None:
+        """The run of sequences dropped from the ASR queue, once it has ended.
+
+        Returned once and then forgotten, so the runtime emits exactly one gap
+        segment per run of overload rather than one per frame.
+        """
+        if self._skipped_from is None or self.queue_full:
+            return None
+        span = (self._skipped_from, self.last_sequence)
+        self._skipped_from = None
+        return span
+
+    @property
+    def queue_full(self) -> bool:
+        return self._queue.full()
+
+    def overloaded_for_s(self) -> float:
+        """How long this stream has been stuck at the ceiling (tech spec 8.4)."""
+        if self._overloaded_since is None:
+            return 0.0
+        return time.monotonic() - self._overloaded_since
+
+    @property
+    def last_sequence(self) -> int:
+        """The highest `seq` accepted so far; -1 before the first frame.
+
+        The gateway seeds a resumed socket from this so a client replaying its
+        buffer cannot smuggle duplicates past the check by reconnecting.
+        """
+        return -1 if self._last_seq is None else self._last_seq
+
+    def idle_for_s(self) -> float:
+        """Wall seconds since the last accepted frame.
+
+        Wall time is right here and only here: this measures how long real
+        silence has lasted, which is a question about the world rather than
+        about the stream. Nothing derived from it reaches the timeline —
+        segment boundaries stay frame-derived (ADR-11).
+        """
+        return time.monotonic() - self._last_frame_at
+
+    def disconnected(self) -> None:
+        self.connected = False
+
+    def reconnected(self) -> None:
+        self.connected = True
 
     @property
     def queue_depth(self) -> int:
@@ -110,6 +188,11 @@ class ParticipantSession:
     @property
     def lagging(self) -> bool:
         return self.queue_depth >= QUEUE_LAGGING_FRAMES
+
+    @property
+    def lag_ms(self) -> int:
+        """How far behind the recognizer is, in milliseconds of queued audio."""
+        return self.queue_depth * FRAME_DURATION_MS
 
     async def next_frame(self) -> QueuedFrame | None:
         return await self._queue.get()
