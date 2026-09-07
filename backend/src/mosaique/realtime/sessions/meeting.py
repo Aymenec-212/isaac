@@ -156,6 +156,12 @@ class MeetingRuntime:
         self._file_frames: dict[str, int] = {}
         self._stream_status: dict[str, str] = {}
         self._pending: list[_PendingSegment] = []
+        # One writer at a time. Every participant's pump persists through the
+        # same buffer, and without this two of them interleave around the
+        # `await`: the first snapshots the buffer, writes it, and clears a
+        # segment the second appended in between — which is then never written
+        # by anyone, though it has already been broadcast.
+        self._persist_lock = asyncio.Lock()
         self._consumer: asyncio.Task[None] | None = None
         self._idle_sweep: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
@@ -640,37 +646,41 @@ class MeetingRuntime:
         ahead of the next one, so recovery needs no separate sweep.
         """
         self._pending.append(segment)
-        try:
-            async with session_scope() as db:
-                repo = SegmentRepository(db, self.meeting.organization_id)
-                for held in self._pending:
-                    await repo.add_final(
-                        meeting_id=self.meeting.meeting_id,
-                        participant_id=held.participant_id,
-                        audio_session_id=held.audio_session_id,
-                        sequence=held.sequence,
-                        start_ms=held.start_ms,
-                        end_ms=held.end_ms,
-                        text=held.text,
-                        words=held.words,
-                        status=held.status,
-                        segment_id=held.segment_id,
-                    )
-        except Exception as exc:
-            log.error(
-                "segment_persist_failed",
-                error_type=type(exc).__name__,
-                held=len(self._pending),
-            )
-            if len(self._pending) >= PERSISTENCE_BUFFER_MAX:
-                # Past here the runtime is holding more than it promised to.
-                # Say so rather than let the buffer grow without bound.
-                del self._pending[:-PERSISTENCE_BUFFER_MAX]
-                await self._publish_status(segment.participant_id, "unavailable")
-        else:
-            if self._pending:
-                log.info("segments_persisted", count=len(self._pending))
-            self._pending.clear()
+        async with self._persist_lock:
+            batch = list(self._pending)
+            try:
+                async with session_scope() as db:
+                    repo = SegmentRepository(db, self.meeting.organization_id)
+                    for held in batch:
+                        await repo.add_final(
+                            meeting_id=self.meeting.meeting_id,
+                            participant_id=held.participant_id,
+                            audio_session_id=held.audio_session_id,
+                            sequence=held.sequence,
+                            start_ms=held.start_ms,
+                            end_ms=held.end_ms,
+                            text=held.text,
+                            words=held.words,
+                            status=held.status,
+                            segment_id=held.segment_id,
+                        )
+            except Exception as exc:
+                log.error(
+                    "segment_persist_failed",
+                    error_type=type(exc).__name__,
+                    held=len(self._pending),
+                )
+                if len(self._pending) >= PERSISTENCE_BUFFER_MAX:
+                    # Past here the runtime is holding more than it promised
+                    # to. Say so rather than let the buffer grow without bound.
+                    del self._pending[:-PERSISTENCE_BUFFER_MAX]
+                    await self._publish_status(segment.participant_id, "unavailable")
+            else:
+                # Drop exactly what was written. Anything another pump appended
+                # while this one was awaiting stays, and goes out next time.
+                written = {held.segment_id for held in batch}
+                self._pending = [p for p in self._pending if p.segment_id not in written]
+                log.info("segments_persisted", count=len(batch))
 
     # ---- finalization ----------------------------------------------------
 

@@ -8,6 +8,8 @@ plainly rather than left believing the transcript is safe.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from mosaique.realtime.ingress import MeetingRef
@@ -119,4 +121,49 @@ async def test_recovery_writes_everything_that_was_held(monkeypatch):
     assert written == ["seg-0", "seg-1", "seg-2", "seg-3"], (
         "the backlog was not written in order when the database came back"
     )
+    assert runtime._pending == []
+
+
+async def test_two_pumps_persisting_at_once_lose_nothing(monkeypatch):
+    """Every participant persists through one buffer, so it must be serialised.
+
+    The window is the commit. One pump finishes writing and is suspended in the
+    commit; a second appends its segment meanwhile; the first then clears the
+    whole buffer, including the entry it never wrote. The second wakes, finds
+    the buffer empty and writes nothing — so that segment is broadcast and
+    never stored, with nothing logged as failed. That is exactly how a real
+    two-participant replay ended up one final short.
+    """
+    runtime, session, _ = make_runtime()
+    written: list[str] = []
+    committing = asyncio.Event()
+
+    class _Repo:
+        def __init__(self, *args: object, **kwargs: object) -> None: ...
+
+        async def add_final(self, **kwargs: object) -> str:
+            written.append(str(kwargs["segment_id"]))
+            return str(kwargs["segment_id"])
+
+    class _Scope:
+        async def __aenter__(self):  # type: ignore[no-untyped-def]
+            # Opening a session is I/O, so it suspends — which is where the
+            # second pump gets stuck while the first one clears.
+            await asyncio.sleep(0.05)
+            return object()
+
+        async def __aexit__(self, *exc: object) -> None:
+            # The commit suspends too, and this is the window that matters.
+            committing.set()
+            await asyncio.sleep(0.02)
+
+    monkeypatch.setattr(meeting_module, "session_scope", lambda: _Scope())
+    monkeypatch.setattr(meeting_module, "SegmentRepository", _Repo)
+
+    first = asyncio.create_task(runtime._persist(session, segment(0)))
+    await committing.wait()
+    second = asyncio.create_task(runtime._persist(session, segment(1)))
+    await asyncio.gather(first, second)
+
+    assert sorted(set(written)) == ["seg-0", "seg-1"], f"wrote {written}"
     assert runtime._pending == []
