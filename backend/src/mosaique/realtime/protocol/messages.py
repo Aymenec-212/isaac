@@ -27,8 +27,17 @@ class Hello(BaseModel):
 
 
 class Ping(BaseModel):
+    """Travels in both directions.
+
+    §7.1 lists `ping` as client to server and §7.2 lists only `pong` coming
+    back, but §7.4 says the *server* pings every 10 s and calls a socket dead
+    after 30 s with no pong. Both halves are needed — a suspended tab stops
+    sending without ever closing the connection — so the same message shape
+    serves both, and `type` carries a default so the server can build one.
+    """
+
     v: Literal[1] = 1
-    type: Literal["ping"]
+    type: Literal["ping"] = "ping"
     t: int
 
 

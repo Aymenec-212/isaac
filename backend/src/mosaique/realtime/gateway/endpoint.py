@@ -6,6 +6,7 @@ Responsibilities stop at the seam: authenticate, validate frames, and submit
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import time
@@ -26,15 +27,57 @@ from mosaique.persistence.repositories.transcript import ParticipantRepository
 from mosaique.realtime.ingress import MeetingRef, ParticipantJoined, ParticipantLeft
 from mosaique.realtime.ingress.interfaces import IngressAudioFrame
 from mosaique.realtime.protocol.frames import FrameRejection, InvalidFrame, decode_frame
-from mosaique.realtime.protocol.messages import ErrorMessage, Hello, HelloOk, Pong
+from mosaique.realtime.protocol.messages import ErrorMessage, Hello, HelloOk, Ping, Pong
 from mosaique.realtime.runtime_state import get_registry
 
 log = get_logger(__name__)
 router = APIRouter()
 
+# Tech spec 7.4: ping every 10 s; a socket with no pong and no frame for 30 s
+# is dead. Both are transport concerns and stay on this side of the seam — the
+# runtime is told the stream was lost, never why.
+PING_INTERVAL_S = 10.0
+STALE_AFTER_S = 30.0
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+async def _keepalive(websocket: WebSocket, liveness: _Liveness) -> None:
+    """Ping on a timer and hang up on a socket that has gone quiet.
+
+    A dropped TCP connection is often not reported to the application at all —
+    a suspended tab is the common case — so silence, not an error, is what says
+    the client is gone. Closing here is what starts the reconnect grace, since
+    the runtime only ever learns that the transport ended.
+    """
+    try:
+        while True:
+            await asyncio.sleep(PING_INTERVAL_S)
+            if liveness.silent_for() > STALE_AFTER_S:
+                log.info("ws_stale", silent_s=round(liveness.silent_for(), 1))
+                await websocket.close(code=1001)
+                return
+            await websocket.send_json(Ping(t=_now_ms()).model_dump())
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # The socket died under us; the frame loop will notice and clean up.
+        return
+
+
+class _Liveness:
+    """Last time this socket proved it was still there."""
+
+    def __init__(self) -> None:
+        self._last = time.monotonic()
+
+    def seen(self) -> None:
+        self._last = time.monotonic()
+
+    def silent_for(self) -> float:
+        return time.monotonic() - self._last
 
 
 @router.websocket("/ws/meetings/{meeting_id}")
@@ -43,6 +86,7 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
     settings = get_settings()
     participant_id: str | None = None
     audio_session_id = new_id()
+    keepalive: asyncio.Task[None] | None = None
 
     try:
         # ---- hello: no audio is accepted before hello.ok (tech spec 13.1) ----
@@ -154,10 +198,13 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
 
         # ---- frame loop ----------------------------------------------------
         last_seq = resume.last_sequence
+        liveness = _Liveness()
+        keepalive = asyncio.create_task(_keepalive(websocket, liveness))
         while True:
             message = await websocket.receive()
             if message.get("type") == "websocket.disconnect":
                 break
+            liveness.seen()
 
             if (raw := message.get("bytes")) is not None:
                 try:
@@ -188,15 +235,19 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
 
             if (text := message.get("text")) is not None:
                 payload = json.loads(text)
-                if payload.get("type") == "ping":
+                kind = payload.get("type")
+                if kind == "ping":
                     await websocket.send_json(Pong(t=payload.get("t", _now_ms())).model_dump())
-                # audio.pause / audio.resume are accepted and ignored in Slice 1 (R-1).
+                elif kind == "pong":
+                    pass  # `liveness.seen()` above already recorded it
 
     except WebSocketDisconnect:
         pass
     except Exception as exc:
         log.error("ws_failed", error_type=type(exc).__name__)
     finally:
+        if keepalive is not None:
+            keepalive.cancel()
         if participant_id is not None:
             registry = get_registry()
             await registry.broadcaster.unregister(meeting_id, participant_id)
