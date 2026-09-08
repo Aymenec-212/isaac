@@ -556,7 +556,7 @@
           "meetings"
         ],
         "summary": "Get Transcript",
-        "description": "Final segments in display order. Interim text is never stored (ADR-05).",
+        "description": "Final segments in display order. Interim text is never stored (ADR-05).\n\n`?q=` filters to segments containing the text (FR-10, tech spec \u00a76). The\nmatch is accent-insensitive \u2014 see `transcript/search.py` for why that is\nworth a deviation from the spec's \"ILIKE for now\" in a French-first product.\n\nFiltering happens after the fetch, which costs nothing extra: rendering the\ntranscript already loads every segment.",
         "operationId": "get_transcript_meetings__meeting_id__transcript_get",
         "parameters": [
           {
@@ -566,6 +566,22 @@
             "schema": {
               "type": "string",
               "title": "Meeting Id"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
             }
           },
           {
@@ -1442,6 +1458,38 @@
         ],
         "title": "ReadinessResponse"
       },
+      "SegmentMatchView": {
+        "properties": {
+          "segment_id": {
+            "type": "string",
+            "title": "Segment Id"
+          },
+          "spans": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Spans"
+          }
+        },
+        "type": "object",
+        "required": [
+          "segment_id",
+          "spans"
+        ],
+        "title": "SegmentMatchView",
+        "description": "Where a search query matched inside one segment (FR-10).\n\nOffsets come from the server rather than being recomputed in the browser,\nso a highlight cannot disagree with what was actually matched \u2014 the two\nwould otherwise need identical accent-folding in two languages."
+      },
       "SegmentView": {
         "properties": {
           "id": {
@@ -1533,6 +1581,30 @@
             },
             "type": "array",
             "title": "Audio Sessions",
+            "default": []
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "total_segments": {
+            "type": "integer",
+            "title": "Total Segments",
+            "default": 0
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/SegmentMatchView"
+            },
+            "type": "array",
+            "title": "Matches",
             "default": []
           }
         },

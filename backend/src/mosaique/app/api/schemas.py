@@ -106,12 +106,32 @@ class AudioSessionView(BaseModel):
     epoch_ms: int
 
 
+class SegmentMatchView(BaseModel):
+    """Where a search query matched inside one segment (FR-10).
+
+    Offsets come from the server rather than being recomputed in the browser,
+    so a highlight cannot disagree with what was actually matched — the two
+    would otherwise need identical accent-folding in two languages.
+    """
+
+    segment_id: str
+    # Half-open [start, end) into the segment's original text.
+    spans: list[tuple[int, int]]
+
+
 class TranscriptResponse(BaseModel):
     meeting_id: str
     transcript_version: int | None
     participants: list[ParticipantView]
     segments: list[SegmentView]
     audio_sessions: list[AudioSessionView] = []
+    # Echoed so a client can tell a filtered transcript from a whole one, and
+    # so a stale response cannot be mistaken for a result for the current query.
+    query: str | None = None
+    # How many segments the meeting has in total, before filtering. Lets the UI
+    # say "3 of 30" rather than leaving someone unsure whether the rest is gone.
+    total_segments: int = 0
+    matches: list[SegmentMatchView] = []
 
 
 class EvidenceItem(BaseModel):

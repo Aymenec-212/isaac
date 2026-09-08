@@ -100,8 +100,11 @@ export const api = {
     }),
   endMeeting: (meetingId: string) =>
     request<{ meeting: Meeting }>(`/meetings/${meetingId}/end`, { method: "POST" }),
-  transcript: (meetingId: string) =>
-    request<TranscriptResponse>(`/meetings/${meetingId}/transcript`),
+  transcript: (meetingId: string, query?: string) =>
+    request<TranscriptResponse>(
+      `/meetings/${meetingId}/transcript` +
+        (query && query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ""),
+    ),
   outputs: (meetingId: string) => request<OutputsResponse>(`/meetings/${meetingId}/outputs`),
 
   /**
