@@ -46,9 +46,12 @@ websockets, or if anything outside `speech/adapters/kyutai/` imports a model
 library. If a change needs those imports to move, the design is wrong, not the
 test.
 
-**Two seams matter most:**
+**Three seams matter most:**
 - `MeetingIngress` (blueprint D-04) — the runtime must not know where audio came from.
 - `StreamingRecognizer` (spec §9.1) — `FakeRecognizer` and Kyutai are interchangeable.
+- `KyutaiBackend` (ADR-13, `speech/adapters/kyutai/backend.py`) — the model is
+  fixed; `mlx` and `moshi_server` are two ways of running it. See the runtime
+  policy below.
 
 **Timeline rule (ADR-11 / blueprint D-02).** Meeting time is derived from frame
 counts with silence padding, never from client clocks. Silence detection is
@@ -60,7 +63,20 @@ already been found twice — see Known traps; do not reintroduce it.
 disposable. Process memory is never the authoritative record.
 
 **Values marked `[measure]` are guesses.** Do not tune them against the fake
-recognizer. They are tuned in Slice 4 against real French audio.
+recognizer. They were tuned in Slice 4 against real French audio; the ones that
+are now measured say so in `PROJECT_STATE.md` §8, and most still do not.
+
+**The ASR runtime is configuration, not architecture.** MLX is what this project
+develops and measures against today, because it is what the available hardware
+runs. It is not an infrastructure decision, and no layer above the adapter may
+assume it. `moshi_server` is the deployment path and already exists behind the
+same `KyutaiBackend` Protocol, unrun for want of a CUDA host. Swapping them must
+stay a config change: if replacing the backend would touch the meeting,
+transcript, or realtime layers, the seam has been broken and that is the bug.
+Two consequences worth knowing before you trust a number: MLX carries no VAD
+heads, so `EndOfTurnEvent` never fires there and §9.3's primary closing rule is
+dead code on this runtime; and every figure in §8 measured on MLX describes
+bf16-on-Apple-silicon, not production (A-16).
 
 ---
 
@@ -112,32 +128,42 @@ A slice is not finished until step 3 is done.
 
 ---
 
-## Current state (2026-09-07)
+## Current state (2026-09-08)
 
-**Slices 0 through 3 are VERIFIED and merged to `main`** (PR #1, PR #2). 181
-tests: 104 backend unit, 48 backend integration and realtime against real
+**Slices 0 through 4 are VERIFIED and merged to `main`** (PR #1, #2, #5, #6). 291
+tests: 214 backend unit, 48 backend integration and realtime against real
 PostgreSQL, 27 frontend unit, 2 Playwright specs — plus a 60-minute accelerated
 run behind `-m slow` that passes at 54.8x realised with no memory growth.
 
-The product spine works end to end on fakes, two participants merge into one
-attributed transcript in both browsers, and every row of the tech spec §14.1
-failure matrix that does not need a real model has a named passing test.
-**Everything in the speech path is still a fake — no real audio has ever been
-transcribed by this system.**
+**Real French audio has now been transcribed end to end, once.** 116.36 s
+through the running app-server against real MLX Kyutai on Apple silicon,
+2026-09-08: **1.43% WER**, p95 first-word latency **1 934 ms**, 30 segments all
+persisted, `asr_version` written as `kyutai/stt-1b-en_fr@mlx-bf16` by the
+app-server rather than hard-coded. Evidence: `docs/slice4-last-test-report.json`.
 
-Three things are open and none of them is code: the cross-network run (A-8),
-Spike A, and the GPU half of A-9. All need hardware.
+Read that as narrowly as it deserves. It is one speaker, one stream, one
+prepared monologue, clean audio, on one machine — and **nothing re-runs it**:
+the model path needs Apple silicon, this repository has no CI (L-18), and no
+sandboxed session can execute it. Of the latency, 1 343 ms of 1 343 ms is the
+model; the transport either side is noise.
 
-Next: **Slice 4 — real Kyutai**, blocked on Q2, Spike B and Spike C. It is also
-the slice that can invalidate earlier work, because every `[measure]` value has
-so far been tuned against a recognizer that emits a fixed script at a fixed
-delay. Start from `PROJECT_STATE.md` §12.
+The same run found a defect its WER could not see: **8 of 30 segments are a
+sentence's final word alone in a 160-400 ms segment** (L-28), because the model
+withholds that word while it settles the punctuation and the silence tick closes
+on a gap that is not in the audio. Recorded, not fixed. Slice 5 consumes
+segments, so it is the first thing to decide.
+
+Still open, all hardware: Spike B2 and A-3 (a CUDA host, also the only way to
+test `moshi_server`, `EndOfTurnEvent` and A-16), the cross-network run (A-8),
+Spike A, and the GPU half of A-9.
+
+Next: **L-28, then Slice 5.** Start from `PROJECT_STATE.md` §12.
 
 ---
 
 ## Known traps
 
-Four mistakes this codebase has actually made. Each cost real debugging time
+Five mistakes this codebase has actually made. Each cost real debugging time
 and each is easy to repeat.
 
 **Stream time is not wall time.** Silence and segment boundaries are judged in
@@ -159,4 +185,11 @@ rules with a leading slash, and check `git check-ignore -v` when a file vanishes
 30 s of silence (§7.4), and it is right to. The harness generated an hour of
 synthetic audio *after* connecting and looked exactly like a dead client;
 generate first, connect second, and yield inside any tight send loop.
+
+**A model's clock can run ahead of its own words.** On the first real fixture the
+silence tick closed 8 of 30 segments where the audio has only a 160-560 ms gap,
+orphaning each sentence's last word — and WER scored 1.43% straight through it.
+The suspected cause is emission lag outrunning `transcribed_offset_ms`; that is
+inferred, not observed (L-28). Judge segmentation by looking at boundaries, never
+by a word-level score.
 
