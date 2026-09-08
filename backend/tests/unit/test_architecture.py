@@ -31,7 +31,9 @@ DOWNSTREAM_OF_INGRESS = [
 ]
 
 TRANSPORT_MODULES = {"fastapi", "starlette", "websockets", "uvicorn"}
-MODEL_MODULES = {"moshi", "torch", "transformers", "moshi_mlx"}
+# ADR-13 consequence 4: a second runtime is exactly when this test stops being
+# theatre, so the MLX libraries are named here before the adapter exists.
+MODEL_MODULES = {"moshi", "torch", "transformers", "moshi_mlx", "mlx", "mlx_lm"}
 
 
 def imported_modules(path: Path) -> set[str]:

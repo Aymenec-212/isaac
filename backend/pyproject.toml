@@ -55,8 +55,15 @@ select = ["E", "F", "I", "UP", "B", "SIM", "TID"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-mypy_path = "src:."
+# `tools/spike_b1` is on the path because the spike is a standalone PEP 723
+# script, not an installed package (ADR-13 consequence 5 keeps MLX out of this
+# project's dependencies), so its modules are imported by bare name.
+mypy_path = "src:.:tools/spike_b1"
 packages = ["mosaique", "tools.replay"]
+# The two halves of Spike B1 that contain no MLX import. `probe.py` is
+# deliberately absent: it imports a model library that cannot be installed on
+# Linux, so type-checking it would fail everywhere except one laptop.
+modules = ["b1_analysis", "b1_summary"]
 plugins = []
 
 [[tool.mypy.overrides]]

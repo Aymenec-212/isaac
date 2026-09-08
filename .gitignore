@@ -38,6 +38,10 @@ blob-report/
 /audio/
 /backend/audio/
 
+# Spike B1 writes its token log, VAD series and report here. Anchored for the
+# same reason as the rules above: a bare `out/` would match anything.
+/backend/tools/spike_b1/out/
+
 # --- OS ---
 .DS_Store
 Thumbs.db
