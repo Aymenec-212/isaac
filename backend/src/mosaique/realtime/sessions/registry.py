@@ -32,6 +32,17 @@ class MeetingRegistry:
         self._ingresses: dict[str, BrowserWebSocketIngress] = {}
         self._lock = asyncio.Lock()
 
+    @property
+    def audio_store(self) -> AudioStore:
+        """Read access for the FR-11 audio route.
+
+        The registry already owns the one configured store, and the review page
+        has to read back exactly what the runtime wrote. Handing out the same
+        object is what keeps `object_key` meaning the same thing on both sides;
+        a second store built from settings could drift from this one.
+        """
+        return self._audio_store
+
     async def ensure(self, meeting: MeetingRef, started_at_ms: int) -> MeetingRuntime:
         async with self._lock:
             existing = self._runtimes.get(meeting.meeting_id)

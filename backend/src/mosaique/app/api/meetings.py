@@ -8,12 +8,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Request, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
 from mosaique.app.api.dependencies import PrincipalDep, SessionDep, SettingsDep
+from mosaique.app.api.ranges import UnsatisfiableRange, parse_range
 from mosaique.app.api.schemas import (
     ActionItemView,
+    AudioSessionView,
     CreateMeetingRequest,
     CreateMeetingResponse,
     EndMeetingResponse,
@@ -42,9 +45,10 @@ from mosaique.domain.state import InvalidTransition, MeetingState, end, open_roo
 from mosaique.jobs import JOB_KIND, PROCESSOR_VERSION
 from mosaique.observability.logging import get_logger
 from mosaique.observability.metrics import METRICS
-from mosaique.persistence.models import Meeting
+from mosaique.persistence.models import AudioSession, Meeting
 from mosaique.persistence.repositories.meetings import MeetingRepository
 from mosaique.persistence.repositories.transcript import (
+    AudioSessionRepository,
     JobRepository,
     OutputsRepository,
     ParticipantRepository,
@@ -224,11 +228,15 @@ async def get_transcript(
     participants = await ParticipantRepository(session, principal.organization_id).list_for_meeting(
         meeting_id
     )
+    audio_sessions = await AudioSessionRepository(
+        session, principal.organization_id
+    ).list_for_meeting(meeting_id)
     return TranscriptResponse(
         meeting_id=meeting.id,
         transcript_version=meeting.transcript_version,
         participants=[ParticipantView.model_validate(p) for p in participants],
         segments=[SegmentView.model_validate(s) for s in segments],
+        audio_sessions=[AudioSessionView.model_validate(a) for a in audio_sessions],
     )
 
 
@@ -258,3 +266,85 @@ async def get_outputs(
         return OutputsResponse(status="failed", error_code="POSTPROCESSING_FAILED")
     response.status_code = status.HTTP_202_ACCEPTED
     return OutputsResponse(status=job.status if job else "pending")
+
+
+# Canonical audio is headerless PCM, so the browser is told exactly that and
+# decodes it with the Web Audio API rather than an <audio> element. Declaring
+# it audio/wav would be a lie a media element believes until it fails.
+AUDIO_CONTENT_TYPE = "application/octet-stream"
+
+
+@router.get("/{meeting_id}/audio/{session_id}")
+async def get_audio(
+    meeting_id: str,
+    session_id: str,
+    request: Request,
+    principal: PrincipalDep,
+    session: SessionDep,
+) -> Response:
+    """Stored PCM for one audio session, with Range support (tech spec 6, FR-11).
+
+    The review page seeks by timestamp, and `store.py` makes that arithmetic
+    rather than a lookup: the file holds silence padding too, so
+    `byte_offset = session_ms * BYTES_PER_MS` is exact. This route does not
+    need to know that — it answers in bytes and lets the caller do the sum.
+
+    Tenancy is enforced the same way every other read is, and then once more:
+    the `AudioSession` row must belong to the meeting named in the path, so a
+    valid session id from another meeting in the same organization cannot be
+    replayed here.
+    """
+    if not is_valid_id(meeting_id) or not is_valid_id(session_id):
+        raise NotFound()
+
+    repo = MeetingRepository(session, principal.organization_id)
+    authorize_meeting_access(principal, await repo.get(meeting_id))
+
+    audio_session = await session.get(AudioSession, session_id)
+    if (
+        audio_session is None
+        or audio_session.organization_id != principal.organization_id
+        or audio_session.meeting_id != meeting_id
+        or not audio_session.audio_object_key
+    ):
+        raise NotFound()
+
+    store = get_registry().audio_store
+    total = store.size_bytes(audio_session.audio_object_key)
+    if total is None:
+        # The row exists but the bytes do not: the null store discarded them,
+        # or Q3 retention removed them. Not an error in the transcript sense —
+        # the meeting is still fully readable without its audio.
+        raise NotFound()
+
+    try:
+        byte_range = parse_range(request.headers.get("range"), total)
+    except UnsatisfiableRange:
+        return Response(
+            status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+            headers={"Content-Range": f"bytes */{total}"},
+        )
+
+    headers = {
+        # Without this a browser never issues a second request, so the scrub
+        # bar renders but seeking does nothing.
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, no-store",
+    }
+    if byte_range is None:
+        return StreamingResponse(
+            store.read_range(audio_session.audio_object_key, 0, total),
+            media_type=AUDIO_CONTENT_TYPE,
+            headers={**headers, "Content-Length": str(total)},
+        )
+
+    return StreamingResponse(
+        store.read_range(audio_session.audio_object_key, byte_range.start, byte_range.length),
+        status_code=status.HTTP_206_PARTIAL_CONTENT,
+        media_type=AUDIO_CONTENT_TYPE,
+        headers={
+            **headers,
+            "Content-Range": byte_range.content_range,
+            "Content-Length": str(byte_range.length),
+        },
+    )

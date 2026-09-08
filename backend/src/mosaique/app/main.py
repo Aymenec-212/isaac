@@ -16,12 +16,17 @@ from mosaique.app.api import health, meetings
 from mosaique.asr_runtime import build_recognizer
 from mosaique.config.settings import Settings, get_settings
 from mosaique.domain.errors import ErrorCode, MosaiqueError
-from mosaique.intelligence.provider import FakeLLMProvider
 from mosaique.jobs import MeetingIntelligenceProcessor
+from mosaique.llm_runtime import build_llm_provider
 from mosaique.observability.logging import configure_logging, get_logger, request_id_var
 from mosaique.persistence.engine import dispose_engine, init_engine
 from mosaique.realtime.gateway import endpoint as ws_endpoint
-from mosaique.realtime.runtime_state import begin_drain, init_registry, shutdown_registry
+from mosaique.realtime.runtime_state import (
+    begin_drain,
+    get_registry,
+    init_registry,
+    shutdown_registry,
+)
 
 log = get_logger(__name__)
 
@@ -76,7 +81,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await preload()
         log.info("asr_runtime_ready", runtime=settings.asr_runtime)
     init_registry(recognizer=recognizer, audio_root=settings.audio_root)
-    processor = MeetingIntelligenceProcessor(FakeLLMProvider())
+    processor = MeetingIntelligenceProcessor(
+        build_llm_provider(settings), broadcaster=get_registry().broadcaster
+    )
     processor.start()
 
     await recover_finalizing_meetings()

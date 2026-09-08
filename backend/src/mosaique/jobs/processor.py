@@ -33,6 +33,8 @@ from mosaique.persistence.repositories.transcript import (
     ParticipantRepository,
     SegmentRepository,
 )
+from mosaique.realtime.ingress.interfaces import Broadcaster
+from mosaique.realtime.protocol.messages import OutputsReady
 
 log = get_logger(__name__)
 
@@ -44,9 +46,25 @@ BACKOFF_S = (30, 120, 480)
 
 
 class MeetingIntelligenceProcessor:
-    def __init__(self, provider: LLMProvider, *, poll_interval_s: float = 1.0) -> None:
+    def __init__(
+        self,
+        provider: LLMProvider,
+        *,
+        poll_interval_s: float = 1.0,
+        broadcaster: Broadcaster | None = None,
+    ) -> None:
+        """`broadcaster` is optional and injected, never reached for.
+
+        Tech spec 12.1 wants `meeting.outputs.ready` sent to whoever is still
+        connected when a job finishes. That is a notification, not a result:
+        the outputs are already durable and `GET /outputs` is the contract the
+        review page actually depends on (§119). Passing the seam in keeps this
+        module free of the transport, and passing None keeps every existing
+        test constructing it unchanged.
+        """
         self._provider = provider
         self._poll_interval_s = poll_interval_s
+        self._broadcaster = broadcaster
         self._task: asyncio.Task[None] | None = None
         self._stopping = asyncio.Event()
 
@@ -94,7 +112,26 @@ class MeetingIntelligenceProcessor:
                 claimed.status = "succeeded"
                 claimed.last_error = None
         log.info("job_succeeded", meeting_id=meeting_id, job_id=job_id)
+        await self._announce_ready(meeting_id)
         return True
+
+    async def _announce_ready(self, meeting_id: str) -> None:
+        """Tell anyone still watching. Never let it fail the job.
+
+        The work is done and committed by this point, so a broken socket must
+        not mark a succeeded job failed and re-run a paid LLM call. Whoever
+        missed the message polls `GET /outputs` and gets the same answer.
+        """
+        if self._broadcaster is None:
+            return
+        try:
+            await self._broadcaster.publish(meeting_id, OutputsReady().model_dump())
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning(
+                "outputs_ready_broadcast_failed",
+                meeting_id=meeting_id,
+                error_type=type(exc).__name__,
+            )
 
     async def _run_job(
         self, meeting_id: str, organization_id: str, payload: dict[str, object]

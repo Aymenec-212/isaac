@@ -81,6 +81,29 @@ class SegmentView(BaseModel):
     end_ms: int
     text: str
     status: str
+    # Which stored recording this segment came from (FR-11). Nullable because a
+    # gap segment (L-20) describes audio that was never received.
+    audio_session_id: str | None = None
+
+
+class AudioSessionView(BaseModel):
+    """Where one participant's recording sits on the meeting timeline.
+
+    The review page needs `epoch_ms` to turn a segment's meeting-relative
+    `start_ms` into an offset inside the file:
+
+        offset_ms = segment.start_ms - session.epoch_ms
+
+    Sent alongside the segments rather than repeated on each one, because it is
+    a property of the recording and there are a handful of recordings and
+    hundreds of segments.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    participant_id: str
+    epoch_ms: int
 
 
 class TranscriptResponse(BaseModel):
@@ -88,6 +111,7 @@ class TranscriptResponse(BaseModel):
     transcript_version: int | None
     participants: list[ParticipantView]
     segments: list[SegmentView]
+    audio_sessions: list[AudioSessionView] = []
 
 
 class EvidenceItem(BaseModel):
