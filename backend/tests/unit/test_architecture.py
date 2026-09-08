@@ -31,6 +31,11 @@ DOWNSTREAM_OF_INGRESS = [
 ]
 
 TRANSPORT_MODULES = {"fastapi", "starlette", "websockets", "uvicorn"}
+# Slice 5 adds a second outbound client on the intelligence axis. `httpx` is
+# not a *transport* in the D-04 sense — it carries nothing inbound — so it gets
+# its own rule below rather than joining the set above, which would fail the
+# test client in `tests/` for no reason.
+HTTP_CLIENT_MODULES = {"httpx", "requests", "aiohttp", "openai"}
 # ADR-13 consequence 4: a second runtime is exactly when this test stops being
 # theatre. `mlx_runtime.py` now really does import these, so the ban is load
 # bearing rather than hypothetical.
@@ -82,6 +87,33 @@ def test_only_the_kyutai_adapter_may_import_model_libraries():
         if leaked:
             offenders[str(path.relative_to(SRC))] = sorted(leaked)
     assert not offenders, f"model libraries leaked out of the adapter: {offenders}"
+
+
+def test_intelligence_does_not_import_an_http_client():
+    """The LLM seam, held the same way the ASR one is.
+
+    `intelligence/` owns the prompt, the schema and the vendor translation;
+    `llm_runtime/` owns the socket. Without this test the split survives only
+    as a convention, and the convenient `import httpx` is one layer away —
+    exactly how `moshi-server`'s client would have ended up inside `speech/`.
+    """
+    offenders = {
+        str(path.relative_to(SRC)): sorted(imported_modules(path) & HTTP_CLIENT_MODULES)
+        for path in python_files("intelligence")
+        if imported_modules(path) & HTTP_CLIENT_MODULES
+    }
+    assert not offenders, f"an HTTP client leaked into the intelligence layer: {offenders}"
+
+
+def test_the_llm_adapter_is_reachable_without_its_transport():
+    """The property the seam exists for, stated as an import rather than prose.
+
+    If this module can be imported with no HTTP client installed, then the
+    OpenAI adapter can be unit-tested without a network or an API key — which
+    is the whole reason the translation lives apart from the plumbing.
+    """
+    module = SRC / "intelligence" / "adapters" / "openai_chat.py"
+    assert not (imported_modules(module) & HTTP_CLIENT_MODULES)
 
 
 def test_the_runtime_depends_on_the_ingress_protocol_not_the_websocket_class():

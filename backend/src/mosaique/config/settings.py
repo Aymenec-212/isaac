@@ -59,6 +59,24 @@ class Settings(BaseSettings):
     # A wrong value produces a wrong `Meeting.asr_version` (ADR-13 §3).
     asr_moshi_server_quantization: str = "bf16"
 
+    # --- Meeting intelligence provider (Q2, Slice 5) ----------------------
+    # Same shape as the ASR axis above and for the same reason: the provider is
+    # a configuration choice, not an architecture one. `fake` is the default so
+    # every test and every slice before this one keeps running without a key
+    # and without spending anyone's credits.
+    #
+    # Q2's residency half is NOT answered by this setting. OpenAI is a US
+    # processor; `llm_base_url` exists so an EU-resident or self-hosted
+    # OpenAI-compatible endpoint is a config change rather than a new adapter.
+    llm_provider: Literal["fake", "openai"] = "fake"
+    llm_model: str = "gpt-4o-mini"
+    llm_api_key: str | None = None
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_timeout_s: float = Field(default=60.0, gt=0)
+    # Tech spec 12.1 allows three attempts; this caps what one meeting can cost
+    # when a provider returns malformed JSON repeatedly.
+    llm_max_output_tokens: int = Field(default=4096, ge=256)
+
     # Refused in production config (tech spec 13.3).
     log_transcript_text: bool = False
 
@@ -82,6 +100,19 @@ class Settings(BaseSettings):
         """
         if info.data.get("asr_runtime") == "moshi_server" and not v:
             raise ValueError("asr_moshi_server_url is required when asr_runtime is 'moshi_server'")
+        return v
+
+    @field_validator("llm_api_key")
+    @classmethod
+    def _openai_needs_a_key(cls, v: str | None, info) -> str | None:  # type: ignore[no-untyped-def]
+        """Fail at startup, not three retries into a finished meeting.
+
+        Same reasoning as `_moshi_server_needs_a_url`: a missing key is knowable
+        before any work happens, and discovering it inside the job processor
+        costs a real meeting its outputs and burns all three attempts first.
+        """
+        if info.data.get("llm_provider") == "openai" and not v:
+            raise ValueError("llm_api_key is required when llm_provider is 'openai'")
         return v
 
     @field_validator("log_transcript_text")

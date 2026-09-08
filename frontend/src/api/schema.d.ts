@@ -152,6 +152,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/meetings/{meeting_id}/audio/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Audio
+         * @description Stored PCM for one audio session, with Range support (tech spec 6, FR-11).
+         *
+         *     The review page seeks by timestamp, and `store.py` makes that arithmetic
+         *     rather than a lookup: the file holds silence padding too, so
+         *     `byte_offset = session_ms * BYTES_PER_MS` is exact. This route does not
+         *     need to know that — it answers in bytes and lets the caller do the sum.
+         *
+         *     Tenancy is enforced the same way every other read is, and then once more:
+         *     the `AudioSession` row must belong to the meeting named in the path, so a
+         *     valid session id from another meeting in the same organization cannot be
+         *     replayed here.
+         */
+        get: operations["get_audio_meetings__meeting_id__audio__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -168,6 +198,27 @@ export interface components {
             owner_text?: string | null;
             /** Due Text */
             due_text?: string | null;
+        };
+        /**
+         * AudioSessionView
+         * @description Where one participant's recording sits on the meeting timeline.
+         *
+         *     The review page needs `epoch_ms` to turn a segment's meeting-relative
+         *     `start_ms` into an offset inside the file:
+         *
+         *         offset_ms = segment.start_ms - session.epoch_ms
+         *
+         *     Sent alongside the segments rather than repeated on each one, because it is
+         *     a property of the recording and there are a handful of recordings and
+         *     hundreds of segments.
+         */
+        AudioSessionView: {
+            /** Id */
+            id: string;
+            /** Participant Id */
+            participant_id: string;
+            /** Epoch Ms */
+            epoch_ms: number;
         };
         /** CreateMeetingRequest */
         CreateMeetingRequest: {
@@ -337,6 +388,8 @@ export interface components {
             text: string;
             /** Status */
             status: string;
+            /** Audio Session Id */
+            audio_session_id?: string | null;
         };
         /** TranscriptResponse */
         TranscriptResponse: {
@@ -348,6 +401,11 @@ export interface components {
             participants: components["schemas"]["ParticipantView"][];
             /** Segments */
             segments: components["schemas"]["SegmentView"][];
+            /**
+             * Audio Sessions
+             * @default []
+             */
+            audio_sessions: components["schemas"]["AudioSessionView"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -827,6 +885,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutputsResponse"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not permitted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_audio_meetings__meeting_id__audio__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                meeting_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Missing or invalid token */

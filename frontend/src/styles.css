@@ -464,3 +464,40 @@ input[type="text"] {
   font-size: 13px;
   word-break: break-all;
 }
+
+/* --- Slice 5: evidence links and cited segments (FR-11) ------------------ */
+
+.evidence-link {
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.evidence-link:hover:not(:disabled) {
+  opacity: 1;
+}
+
+/* A citation with no stored audio still shows, so that a real citation is
+   never mistaken for a model that failed to cite anything. */
+.evidence-link:disabled {
+  cursor: default;
+  opacity: 0.4;
+  border-style: dashed;
+}
+
+.line-cited {
+  background: rgba(120, 160, 255, 0.16);
+  border-radius: 4px;
+}
+
+.muted {
+  opacity: 0.7;
+  font-size: 0.9em;
+}

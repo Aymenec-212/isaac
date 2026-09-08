@@ -82,4 +82,33 @@ export const api = {
   transcript: (meetingId: string) =>
     request<TranscriptResponse>(`/meetings/${meetingId}/transcript`),
   outputs: (meetingId: string) => request<OutputsResponse>(`/meetings/${meetingId}/outputs`),
+
+  /**
+   * Stored PCM for one audio session (FR-11).
+   *
+   * Not routed through `request`: the body is raw bytes, not JSON, and the
+   * Web Audio path wants an ArrayBuffer. The bearer token still travels,
+   * because the route is tenant-scoped like every other read.
+   */
+  audio: async (meetingId: string, sessionId: string): Promise<ArrayBuffer> => {
+    const headers = new Headers();
+    const bearer = token.get();
+    if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
+
+    let response: Response;
+    try {
+      response = await fetch(`${BASE}/meetings/${meetingId}/audio/${sessionId}`, { headers });
+    } catch {
+      throw new ApiError("NETWORK_UNAVAILABLE", "Le serveur est injoignable.", "", 0);
+    }
+    if (!response.ok) {
+      throw new ApiError(
+        "AUDIO_UNAVAILABLE",
+        "L'enregistrement n'est pas disponible.",
+        "",
+        response.status,
+      );
+    }
+    return response.arrayBuffer();
+  },
 };

@@ -92,6 +92,18 @@ class AudioSessionRepository:
         await self._session.flush()
         return audio_session
 
+    async def list_for_meeting(self, meeting_id: str) -> Sequence[AudioSession]:
+        """Every recording for a meeting, for FR-11 evidence navigation."""
+        result = await self._session.execute(
+            select(AudioSession)
+            .where(
+                AudioSession.meeting_id == meeting_id,
+                AudioSession.organization_id == self._organization_id,
+            )
+            .order_by(AudioSession.started_at)
+        )
+        return result.scalars().all()
+
     async def finish(
         self, audio_session_id: str, *, frames_received: int, frames_dropped: int
     ) -> None:

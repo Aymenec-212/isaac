@@ -167,3 +167,53 @@ async def test_startup_recovery_completes_a_stranded_finalizing_meeting(
 
     transcript = await ws_client.http.get(f"/meetings/{meeting_id}/transcript", headers=auth(token))
     assert transcript.json()["segments"], "final segments survive the crash"
+
+
+async def test_outputs_ready_reaches_a_socket_that_is_still_open(ws_client, settings, tenants):
+    """Tech spec 12.1: tell whoever is still watching when the job finishes.
+
+    A notification, not a result — `GET /outputs` remains the contract, and the
+    test below proves a broken socket cannot undo a finished job. This one
+    proves the happy path actually sends something, which is the half that
+    would otherwise be dead code nobody noticed.
+    """
+    token, meeting_id, joined = await create_and_join(ws_client.http, settings, tenants["alpha"])
+    async with ws_client.websocket_connect(f"/ws/meetings/{meeting_id}") as ws:
+        await ws.send_json({"v": 1, "type": "hello", "session_token": joined["session_token"]})
+        await ws.receive_json()
+        await stream_until_finals(ws, frames=150, want=2)
+        await ws_client.http.post(f"/meetings/{meeting_id}/end", headers=auth(token))
+        ws.drain()
+
+        processor = MeetingIntelligenceProcessor(
+            FakeLLMProvider(), broadcaster=ws_client.registry.broadcaster
+        )
+        assert await processor.run_once()
+
+        await asyncio.sleep(0.05)
+        assert any(m.get("type") == "meeting.outputs.ready" for m in ws.drain())
+
+
+async def test_a_broadcast_failure_does_not_undo_a_finished_job(ws_client, settings, tenants):
+    """The outputs are durable before anyone is told about them.
+
+    Letting a dead socket mark the job failed would re-run a paid LLM call to
+    re-derive something already committed — so the notification is allowed to
+    fail and the job is not.
+    """
+
+    class BrokenBroadcaster:
+        async def publish(self, meeting_id: str, message: dict[str, object]) -> None:
+            raise RuntimeError("socket is gone")
+
+        async def send_to(self, participant_id: str, message: dict[str, object]) -> None:
+            raise RuntimeError("socket is gone")
+
+    token, meeting_id = await run_meeting_to_completion(ws_client, settings, tenants["alpha"])
+    processor = MeetingIntelligenceProcessor(FakeLLMProvider(), broadcaster=BrokenBroadcaster())
+
+    assert await processor.run_once()
+
+    ready = await ws_client.http.get(f"/meetings/{meeting_id}/outputs", headers=auth(token))
+    assert ready.status_code == 200
+    assert ready.json()["status"] == "succeeded"

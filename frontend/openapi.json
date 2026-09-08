@@ -703,6 +703,112 @@
           }
         }
       }
+    },
+    "/meetings/{meeting_id}/audio/{session_id}": {
+      "get": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Get Audio",
+        "description": "Stored PCM for one audio session, with Range support (tech spec 6, FR-11).\n\nThe review page seeks by timestamp, and `store.py` makes that arithmetic\nrather than a lookup: the file holds silence padding too, so\n`byte_offset = session_ms * BYTES_PER_MS` is exact. This route does not\nneed to know that \u2014 it answers in bytes and lets the caller do the sum.\n\nTenancy is enforced the same way every other read is, and then once more:\nthe `AudioSession` row must belong to the meeting named in the path, so a\nvalid session id from another meeting in the same organization cannot be\nreplayed here.",
+        "operationId": "get_audio_meetings__meeting_id__audio__session_id__get",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Meeting not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -760,6 +866,30 @@
           "evidence_segment_ids"
         ],
         "title": "ActionItemView"
+      },
+      "AudioSessionView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "participant_id": {
+            "type": "string",
+            "title": "Participant Id"
+          },
+          "epoch_ms": {
+            "type": "integer",
+            "title": "Epoch Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "participant_id",
+          "epoch_ms"
+        ],
+        "title": "AudioSessionView",
+        "description": "Where one participant's recording sits on the meeting timeline.\n\nThe review page needs `epoch_ms` to turn a segment's meeting-relative\n`start_ms` into an offset inside the file:\n\n    offset_ms = segment.start_ms - session.epoch_ms\n\nSent alongside the segments rather than repeated on each one, because it is\na property of the recording and there are a handful of recordings and\nhundreds of segments."
       },
       "CreateMeetingRequest": {
         "properties": {
@@ -1237,6 +1367,17 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "audio_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Session Id"
           }
         },
         "type": "object",
@@ -1281,6 +1422,14 @@
             },
             "type": "array",
             "title": "Segments"
+          },
+          "audio_sessions": {
+            "items": {
+              "$ref": "#/components/schemas/AudioSessionView"
+            },
+            "type": "array",
+            "title": "Audio Sessions",
+            "default": []
           }
         },
         "type": "object",

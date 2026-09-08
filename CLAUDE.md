@@ -66,8 +66,17 @@ disposable. Process memory is never the authoritative record.
 recognizer. They were tuned in Slice 4 against real French audio; the ones that
 are now measured say so in `PROJECT_STATE.md` §8, and most still do not.
 
-**The ASR runtime is configuration, not architecture.** MLX is what this project
-develops and measures against today, because it is what the available hardware
+**Providers are configuration, not architecture — both of them.** The same rule
+now covers two axes: `asr_runtime` (`fake` / `mlx` / `moshi_server`) and
+`llm_provider` (`fake` / `openai`). Both default to `fake`, both fail fast on a
+missing key or URL rather than silently downgrading, and both keep the vendor's
+client out of the layer that uses it — `asr_runtime/` and `llm_runtime/` hold
+the sockets, `test_architecture.py` holds the line. A silent fallback to a fake
+is the failure both guard against: scripted French in a real transcript, or an
+invented decision in a real summary, with only `asr_version` / `llm_model` to
+show for it afterwards.
+
+MLX in particular is what this project develops and measures against today, because it is what the available hardware
 runs. It is not an infrastructure decision, and no layer above the adapter may
 assume it. `moshi_server` is the deployment path and already exists behind the
 same `KyutaiBackend` Protocol, unrun for want of a CUDA host. Swapping them must
@@ -88,8 +97,8 @@ uv venv && uv pip install -e ".[dev]"
 uv run alembic upgrade head
 uv run python -m mosaique.app.seed            # prints a host token
 uv run uvicorn mosaique.app.main:create_app --factory --reload --port 8000
-uv run pytest -q                              # 152, 1 deselected
-uv run pytest -q -m "not integration"         # 104, no database needed
+uv run pytest -q                              # 315, 1 deselected
+uv run pytest -q -m "not integration"         # 258, no database needed
 uv run pytest -q -m slow                      # the accelerated hour, ~70 s
 uv run ruff check . && uv run ruff format .
 uv run mypy                                   # strict
@@ -130,10 +139,23 @@ A slice is not finished until step 3 is done.
 
 ## Current state (2026-09-08)
 
-**Slices 0 through 4 are VERIFIED and merged to `main`** (PR #1, #2, #5, #6). 291
-tests: 214 backend unit, 48 backend integration and realtime against real
-PostgreSQL, 27 frontend unit, 2 Playwright specs — plus a 60-minute accelerated
-run behind `-m slow` that passes at 54.8x realised with no memory growth.
+**Slices 0 through 4 are VERIFIED and merged to `main`. Slice 5 is code
+complete, its gate open.** 366 tests: 258 backend unit, 57 backend integration
+and realtime against real PostgreSQL, 49 frontend unit, 2 Playwright specs —
+plus a 60-minute accelerated run behind `-m slow` that passes at 54.8x realised
+with no memory growth.
+
+**Slice 5 built:** the OpenAI provider behind the existing `LLMProvider` seam
+(strict structured outputs, retries, fail-fast config), `GET
+/meetings/{id}/audio/{session_id}` with Range support, and a review page where a
+decision's citation scrolls to the segment and plays the moment it was said.
+Spike D was run and said an hour of French fits one context window, so
+chunk-and-merge was deliberately not built.
+
+**No real LLM call has ever been made from this codebase** (L-31). Every test
+runs on a fake transport, which is the seam working — and which cannot tell you
+OpenAI accepts the body we build. Ten real meetings with a key close the gate
+and answer A-6; the commands are in `PROJECT_STATE.md` §12.
 
 **Real French audio has now been transcribed end to end, once.** 116.36 s
 through the running app-server against real MLX Kyutai on Apple silicon,
@@ -148,16 +170,20 @@ sandboxed session can execute it. Of the latency, 1 343 ms of 1 343 ms is the
 model; the transport either side is noise.
 
 The same run found a defect its WER could not see: **8 of 30 segments are a
-sentence's final word alone in a 160-400 ms segment** (L-28), because the model
-withholds that word while it settles the punctuation and the silence tick closes
-on a gap that is not in the audio. Recorded, not fixed. Slice 5 consumes
-segments, so it is the first thing to decide.
+sentence's final word alone in a 160-400 ms segment** (L-28). **Deferred by
+decision, not oversight** — reassess at the end of Slice 5, and only if it has
+shown real impact on meeting intelligence, evidence linking or transcript
+correctness. `tests/unit/test_l28_orphaned_final_word.py` pins its shape
+meanwhile; Slice 5 builds no special case around it. Do not reopen it
+unprompted, and do not encode its suspected cause anywhere — that is still a
+hypothesis.
 
 Still open, all hardware: Spike B2 and A-3 (a CUDA host, also the only way to
 test `moshi_server`, `EndOfTurnEvent` and A-16), the cross-network run (A-8),
 Spike A, and the GPU half of A-9.
 
-Next: **L-28, then Slice 5.** Start from `PROJECT_STATE.md` §12.
+Next: **close Slice 5's gate** (ten real meetings, one API key), then Slice 6.
+Start from `PROJECT_STATE.md` §12.
 
 ---
 
