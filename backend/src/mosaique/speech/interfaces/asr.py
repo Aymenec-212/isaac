@@ -12,6 +12,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
+from mosaique.speech.interfaces.identity import AsrIdentity
+
 # Canonical audio frame: 80 ms of 24 kHz signed 16-bit mono (tech spec 8.1).
 SAMPLE_RATE_HZ = 24_000
 FRAME_DURATION_MS = 80
@@ -96,6 +98,30 @@ class ASRHealth:
 @runtime_checkable
 class ASRSession(Protocol):
     """One recognizer stream, one participant audio session."""
+
+    @property
+    def identity(self) -> AsrIdentity:
+        """What produced these words (ADR-13 consequence 3).
+
+        On the interface rather than on an adapter because the runtime writes
+        it to `Meeting.asr_version`, and the runtime is not allowed to know
+        which adapter it holds.
+        """
+        ...
+
+    @property
+    def emits_end_of_turn(self) -> bool:
+        """Whether this recognizer ever produces `EndOfTurnEvent`.
+
+        Declared here rather than discovered with `getattr`, because the
+        default a missing attribute would take is a segmentation decision: a
+        recognizer wrongly reported as silent gets the punctuation fallback
+        rule it does not need, and its segments close in different places.
+
+        False on Kyutai's `-mlx` weights, which carry no VAD heads at all
+        (Spike B1 §4) — the measurement that put this on the interface.
+        """
+        ...
 
     async def push_audio(self, chunk: AudioChunk) -> None: ...
 

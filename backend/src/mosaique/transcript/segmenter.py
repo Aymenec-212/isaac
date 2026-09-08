@@ -10,6 +10,15 @@ same code run in unit tests, in the replay harness, and in production, and it
 is why segmentation thresholds can be tuned in Slice 4 against real French
 audio without touching the runtime.
 
+Closing rules, in the order they are checked (tech spec 9.3, as amended by
+Spike B1): sentence-final punctuation, then the duration cap, on each word;
+`EndOfTurnEvent` above threshold; silence in *stream* time; and `flush()`.
+The punctuation rule is new in Slice 4 and the reasoning for it sits on
+`DEFAULT_CLOSE_ON_SENTENCE_END` — in short, the runtime this project develops
+against emits no end-of-turn event at all, and silence alone provably cannot
+separate a sentence boundary from a mid-phrase pause for the one speaker
+measured so far.
+
 Invariant (blueprint X-14): within one segment, interim text only ever grows.
 The chosen model does not retract emitted words, so `revision` is a monotone
 counter, not a correction mechanism. The field stays because a future
@@ -32,11 +41,82 @@ class WordTiming(TypedDict):
     end_ms: int | None
 
 
-# All three are [measure] in the specification. They are guesses until Slice 4
-# tunes them against real French meeting audio using the replay harness.
+# Sentence-final punctuation the model emits. A word ending in one of these
+# closes the segment (see `DEFAULT_CLOSE_ON_SENTENCE_END`).
+SENTENCE_FINAL = (".", "!", "?", "\u2026")
+
+# --- tech spec 9.3 `[measure]` values -------------------------------------
+#
+# Tuned in Slice 4 against `docs/spikes/B1-findings.md` — 64 s of one French
+# speaker, 92 words, 91 inter-word gaps. Each value below says what evidence it
+# rests on, because two of the three still rest on none.
+
 DEFAULT_END_OF_TURN_THRESHOLD = 0.5
-DEFAULT_SILENCE_MS = 700
+"""UNMEASURED, and deliberately not tuned.
+
+The B1 VAD pass was skipped, and the `-mlx` weights carry no VAD heads at all,
+so on that runtime no `EndOfTurnEvent` is ever produced and this threshold is
+dead code. It is live on `moshi_server`, whose `Step` messages do carry a VAD
+signal — which is where it will finally be measurable. Guessing a value from a
+recognizer that cannot emit the event would be worse than leaving 0.5 standing.
+"""
+
+DEFAULT_SILENCE_MS = 1_200
+"""MEASURED, thinly: raised from 700 ms on B1's word timings.
+
+700 ms was wrong in a way one fixture was enough to show. In 64 s of ordinary
+French it splits a phrase six times — `endroits | familiers`, `à | Casablanca`,
+`crée | un` among them — because the largest *mid-phrase* gap that speaker
+leaves is 1120 ms, while the smallest gap at a real sentence end is 880 ms.
+The two distributions overlap, so **no silence threshold separates them**, and
+that is the finding rather than the number: silence alone cannot carry
+segmentation. 1200 ms clears the observed mid-phrase maximum with a little
+margin and leaves the boundaries to the rule below.
+
+One speaker, one recording. A second fixture can move it.
+"""
+
 DEFAULT_MAX_SEGMENT_MS = 15_000
+"""UNMEASURED — the cap never fired. Longest natural segment observed: 12.7 s.
+
+Retained unchanged. It is a safety net against a speaker who never pauses, and
+B1 contained no such speaker, so nothing was learned about it.
+"""
+
+DEFAULT_CLOSE_ON_SENTENCE_END = True
+"""MEASURED: the strongest boundary signal in the fixture, and the only one
+available on MLX.
+
+Kyutai emits punctuation, and in B1 every one of the three mid-transcript
+sentence-final marks landed on a real boundary, with no false positive. Commas
+do not count and were checked separately — the gaps after them run 0-640 ms,
+squarely inside a phrase.
+
+This is a rule the specification did not have, added because §9.3's primary
+mechanism is absent on the development runtime: with no VAD heads, the MLX
+segmenter would otherwise have only a silence timer that the paragraph above
+shows cannot do the job alone.
+
+The runtime enables it exactly where that is true — `ASRSession.emits_end_of_turn`
+is False — and leaves it off where a semantic VAD exists. Running both at once
+is untested: B1 measured punctuation against MLX output, and how it interacts
+with `moshi_server`'s VAD is Spike B2's to find out, not this slice's to assume.
+
+Configurable rather than hard-coded because of a risk one fixture cannot rule
+out: a French abbreviation — `M.`, `Mme.`, `etc.` — ends in a period without
+ending a sentence, and would split mid-phrase. None occurred in B1. See L-24.
+"""
+
+
+def ends_sentence(text: str) -> bool:
+    """Does this word end a sentence?
+
+    Trailing quotes and brackets are stripped first, so `dit."` counts. A word
+    that is *only* punctuation does not: the model occasionally emits a bare
+    mark, and closing on it would produce an empty segment.
+    """
+    stripped = text.rstrip("\"'\u00bb\u201d)]}")
+    return bool(stripped) and stripped.endswith(SENTENCE_FINAL) and stripped not in SENTENCE_FINAL
 
 
 @dataclass(frozen=True)
@@ -92,11 +172,13 @@ class Segmenter:
         end_of_turn_threshold: float = DEFAULT_END_OF_TURN_THRESHOLD,
         silence_ms: int = DEFAULT_SILENCE_MS,
         max_segment_ms: int = DEFAULT_MAX_SEGMENT_MS,
+        close_on_sentence_end: bool = DEFAULT_CLOSE_ON_SENTENCE_END,
     ) -> None:
         self._next_sequence = first_sequence
         self._end_of_turn_threshold = end_of_turn_threshold
         self._silence_ms = silence_ms
         self._max_segment_ms = max_segment_ms
+        self._close_on_sentence_end = close_on_sentence_end
         self._open: _OpenSegment | None = None
 
     @property
@@ -124,6 +206,14 @@ class Segmenter:
                 start_ms=self._open.start_ms,
             )
         )
+
+        # The model punctuates, and in B1 punctuation beat every timing signal
+        # available (see DEFAULT_CLOSE_ON_SENTENCE_END). Checked before the
+        # duration cap so a sentence that ends near the cap closes as a
+        # sentence rather than as an overflow.
+        if self._close_on_sentence_end and ends_sentence(word.text):
+            events.append(self._close("sentence_end"))
+            return events
 
         # Hard cap: split at the last word boundary rather than mid-utterance.
         if self._open.last_word_end_ms - self._open.start_ms >= self._max_segment_ms:

@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from mosaique.observability.latency import STAGE_NAMES, LatencyDecomposition, Stage
+
 
 @dataclass
 class Histogram:
@@ -37,6 +39,16 @@ class Metrics:
     audio_frames_rejected_total: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     meetings_completed_total: int = 0
     asr_frames_skipped_total: int = 0
+    # Slice 4: the `capture -> gateway_recv -> dequeue -> asr_first_event ->
+    # broadcast` decomposition, accumulated across meetings. Per-meeting
+    # numbers live on the runtime; these are what an operator would read.
+    latency_stages: dict[str, Stage] = field(
+        default_factory=lambda: {name: Stage(name) for name in STAGE_NAMES}
+    )
+
+    def merge_latency(self, decomposition: LatencyDecomposition) -> None:
+        for name, stage in decomposition.stages.items():
+            self.latency_stages.setdefault(name, Stage(name)).values.extend(stage.values)
 
     def frames_skipped(self, count: int) -> None:
         """Frames dropped from the ASR queue under overload (tech spec 8.4).
@@ -68,6 +80,9 @@ class Metrics:
             "transcript_first_word_latency_ms_p95": (
                 self.transcript_first_word_latency_ms.percentile(0.95)
             ),
+            "latency_stages_ms": {
+                name: stage.summary() for name, stage in self.latency_stages.items()
+            },
         }
 
 

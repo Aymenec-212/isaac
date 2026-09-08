@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import BinaryIO
 
 from mosaique.domain.ids import new_id
+from mosaique.observability.latency import LatencyDecomposition
 from mosaique.observability.logging import get_logger
 from mosaique.observability.metrics import METRICS
 from mosaique.persistence.engine import session_scope
@@ -50,6 +51,7 @@ from mosaique.realtime.sessions.participant import (
 )
 from mosaique.speech.audio import AudioStore
 from mosaique.speech.interfaces import (
+    FAKE_IDENTITY,
     FRAME_DURATION_MS,
     SILENCE_FRAME,
     ASRErrorEvent,
@@ -156,6 +158,13 @@ class MeetingRuntime:
         self._file_frames: dict[str, int] = {}
         self._stream_status: dict[str, str] = {}
         self._pending: list[_PendingSegment] = []
+        # Slice 4: where the time goes, hop by hop. Held per meeting rather
+        # than globally so one meeting's numbers are readable on their own.
+        self.latency = LatencyDecomposition()
+        # What produced this meeting's words (ADR-13 consequence 3). Read off
+        # the first ASR session opened and written at finalization; the fake
+        # answers too, so the column is never NULL and never ambiguous.
+        self._asr_version: str = FAKE_IDENTITY.truncated()
         # One writer at a time. Every participant's pump persists through the
         # same buffer, and without this two of them interleave around the
         # `await`: the first snapshots the buffer, writes it, and clears a
@@ -165,6 +174,11 @@ class MeetingRuntime:
         self._consumer: asyncio.Task[None] | None = None
         self._idle_sweep: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
+
+    @property
+    def asr_version(self) -> str:
+        """What produced this meeting's words, for `Meeting.asr_version`."""
+        return self._asr_version
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -300,11 +314,20 @@ class MeetingRuntime:
                 },
             )
         )
+        identity = asr.identity
+        self._asr_version = identity.truncated()
         session = ParticipantSession(
             participant_id=participant_id,
             audio_session_id=audio_session_id,
             asr_session=asr,
-            segmenter=Segmenter(first_sequence=first_sequence),
+            segmenter=Segmenter(
+                first_sequence=first_sequence,
+                # Spike B1 §4: the MLX weights emit no end-of-turn signal at
+                # all, so on that runtime punctuation is the only boundary
+                # marker there is. Where a runtime does emit one, both rules
+                # are live and whichever fires first wins.
+                close_on_sentence_end=not asr.emits_end_of_turn,
+            ),
             epoch_ms=epoch_ms,
         )
         self._sessions[participant_id] = session
@@ -391,6 +414,7 @@ class MeetingRuntime:
             # A frame is the clearest possible statement that they are back.
             session.paused = False
         self._frame_arrival_ms.setdefault(frame.participant_id, _now_ms())
+        self.latency.on_gateway_recv(frame.participant_id, frame.seq, frame.capture_ms)
 
         # Tech spec 8.4: the audio file is written here, on arrival, and not in
         # the pump. A frame the ASR queue has no room for is still this
@@ -495,6 +519,7 @@ class MeetingRuntime:
                 frame = await session.next_frame()
                 if frame is None:
                     break
+                self.latency.on_dequeue(session.participant_id, frame.seq)
                 await session.push(frame)
                 # Pushing a frame never awaits anything real, so without this
                 # the pump can drain a full queue without once yielding and
@@ -568,6 +593,7 @@ class MeetingRuntime:
 
     async def _dispatch(self, session: ParticipantSession, event: ASREvent) -> None:
         if isinstance(event, WordEvent):
+            self.latency.on_first_event(session.participant_id, event.start_ms, FRAME_DURATION_MS)
             if session.participant_id not in self._first_word_seen:
                 self._first_word_seen.add(session.participant_id)
                 arrival = self._frame_arrival_ms.get(session.participant_id)
@@ -594,6 +620,7 @@ class MeetingRuntime:
             event = shift(raw, session.epoch_ms)
             if isinstance(event, SegmentDelta):
                 await self._set_speaking(session.participant_id, True)
+                self.latency.on_broadcast(session.participant_id)
                 await self._broadcaster.publish(
                     self.meeting.meeting_id,
                     TranscriptDelta(
@@ -727,6 +754,17 @@ class MeetingRuntime:
             handle.close()
         self._files.clear()
 
+        # Slice 4: the only place the decomposition is reported. There is no
+        # metrics endpoint until Slice 6, so it is logged as one structured
+        # record per meeting — which is also what the smoke test reads.
+        METRICS.merge_latency(self.latency)
+        log.info(
+            "latency_decomposition",
+            meeting_id=self.meeting.meeting_id,
+            asr_version=self._asr_version,
+            stages_ms=self.latency.snapshot(),
+        )
+
     async def _close_participant(self, participant_id: str) -> None:
         """The transport went away. That is not the same as leaving.
 
@@ -825,3 +863,14 @@ class MeetingRuntime:
         for handle in self._files.values():
             handle.close()
         self._files.clear()
+
+        # Slice 4: the only place the decomposition is reported. There is no
+        # metrics endpoint until Slice 6, so it is logged as one structured
+        # record per meeting — which is also what the smoke test reads.
+        METRICS.merge_latency(self.latency)
+        log.info(
+            "latency_decomposition",
+            meeting_id=self.meeting.meeting_id,
+            asr_version=self._asr_version,
+            stages_ms=self.latency.snapshot(),
+        )

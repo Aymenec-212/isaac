@@ -56,6 +56,33 @@ def synthetic_pcm(duration_ms: int, *, seed: int = 1) -> bytes:
     return (block * repeats)[:wanted]
 
 
+class WrongAudioFormat(ValueError):
+    """The recording is not the canonical format, and says how to convert it."""
+
+
+def wav_to_canonical_pcm(source: Path) -> bytes:
+    """Strip a 24 kHz mono 16-bit WAV down to the bytes the gateway accepts.
+
+    Deliberately does not resample. Slice 4 replays real recordings at real
+    time to measure latency, and a resampler written here would be one more
+    thing between the microphone and the number — so a file in the wrong format
+    is refused with the command that fixes it rather than quietly converted.
+    """
+    import wave
+
+    with wave.open(str(source), "rb") as handle:
+        channels = handle.getnchannels()
+        width = handle.getsampwidth()
+        rate = handle.getframerate()
+        if (channels, width, rate) != (1, 2, SAMPLE_RATE_HZ):
+            raise WrongAudioFormat(
+                f"{source} is {channels}ch/{width * 8}-bit/{rate} Hz; the canonical format is "
+                f"1ch/16-bit/{SAMPLE_RATE_HZ} Hz (tech spec 8.1). Convert it with:\n"
+                f"  ffmpeg -i {source} -ac 1 -ar {SAMPLE_RATE_HZ} -sample_fmt s16 converted.wav"
+            )
+        return handle.readframes(handle.getnframes())
+
+
 def load_pcm(path: Path) -> bytes:
     """Read a raw fixture, padding a ragged tail to a whole frame."""
     raw = path.read_bytes()

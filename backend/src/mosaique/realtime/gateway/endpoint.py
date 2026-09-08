@@ -239,6 +239,7 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                         audio_session_id=audio_session_id,
                         seq=frame.sequence,
                         pcm=frame.pcm,
+                        capture_ms=frame.capture_ms,
                     )
                 )
                 continue

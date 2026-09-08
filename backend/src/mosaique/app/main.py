@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from mosaique import __version__
 from mosaique.app.api import health, meetings
+from mosaique.asr_runtime import build_recognizer
 from mosaique.config.settings import Settings, get_settings
 from mosaique.domain.errors import ErrorCode, MosaiqueError
 from mosaique.intelligence.provider import FakeLLMProvider
@@ -21,7 +22,6 @@ from mosaique.observability.logging import configure_logging, get_logger, reques
 from mosaique.persistence.engine import dispose_engine, init_engine
 from mosaique.realtime.gateway import endpoint as ws_endpoint
 from mosaique.realtime.runtime_state import begin_drain, init_registry, shutdown_registry
-from mosaique.speech.adapters.fake import FakeRecognizer
 
 log = get_logger(__name__)
 
@@ -67,7 +67,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Slice 1 runs on fakes end to end. Slice 4 swaps in the Kyutai adapter and
     # Slice 5 a real provider; nothing else in the app changes.
-    init_registry(recognizer=FakeRecognizer(), audio_root=settings.audio_root)
+    recognizer = build_recognizer(settings)
+    # ADR-13: a real runtime may need minutes of warm-up. Better a slow start
+    # than a first meeting that stalls with a live participant on the far end.
+    preload = getattr(recognizer, "preload", None)
+    if preload is not None:
+        log.info("asr_runtime_preloading", runtime=settings.asr_runtime)
+        await preload()
+        log.info("asr_runtime_ready", runtime=settings.asr_runtime)
+    init_registry(recognizer=recognizer, audio_root=settings.audio_root)
     processor = MeetingIntelligenceProcessor(FakeLLMProvider())
     processor.start()
 

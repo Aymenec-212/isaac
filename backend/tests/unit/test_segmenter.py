@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mosaique.speech.interfaces import EndOfTurnEvent, WordEvent
 from mosaique.transcript.segmenter import SegmentDelta, Segmenter, SegmentFinal, shift
 
@@ -116,3 +118,91 @@ def test_shift_leaves_the_original_untouched():
     final = seg.close_open()[0]
     shift(final, 1000)
     assert final.start_ms == 100
+
+
+# --- Slice 4: the sentence-end rule (Spike B1 §4) -------------------------
+#
+# Added because §9.3's primary mechanism is missing on the runtime this project
+# develops against: the `-mlx` weights emit no end-of-turn event at all, and
+# B1's word timings show silence alone cannot separate a sentence boundary from
+# a mid-phrase pause for the speaker measured. Punctuation can.
+
+
+def test_a_word_ending_a_sentence_closes_the_segment():
+    seg = Segmenter()
+    seg.on_word(word("Le", 0))
+    events = seg.on_word(word("budget", 300))
+    assert not any(isinstance(e, SegmentFinal) for e in events)
+
+    events = seg.on_word(word("validé.", 600))
+
+    final = next(e for e in events if isinstance(e, SegmentFinal))
+    assert final.reason == "sentence_end"
+    assert final.text == "Le budget validé."
+    assert not seg.has_open_segment
+
+
+def test_the_delta_for_the_closing_word_is_still_emitted():
+    """The client must see the last word before the segment firms up."""
+    seg = Segmenter()
+    events = seg.on_word(word("Fini.", 0))
+
+    assert isinstance(events[0], SegmentDelta)
+    assert isinstance(events[1], SegmentFinal)
+
+
+def test_a_comma_does_not_end_a_sentence():
+    """Checked against B1: gaps after a comma run 0-640 ms, inside a phrase."""
+    seg = Segmenter()
+    seg.on_word(word("Bonjour,", 0))
+
+    assert seg.has_open_segment
+
+
+@pytest.mark.parametrize("text", ['dit."', "fini !", "vraiment ?", "alors…"])
+def test_trailing_quotes_and_other_marks_still_end_a_sentence(text):
+    seg = Segmenter()
+    events = seg.on_word(word(text, 0))
+
+    assert any(isinstance(e, SegmentFinal) for e in events)
+
+
+def test_a_word_that_is_only_punctuation_does_not_close_an_empty_segment():
+    seg = Segmenter()
+    events = seg.on_word(word(".", 0))
+
+    assert not any(isinstance(e, SegmentFinal) for e in events)
+
+
+def test_the_rule_can_be_turned_off_without_touching_the_code():
+    """Kept configurable for the risk one fixture cannot rule out: `M.` and
+    `etc.` end in a period without ending a sentence (L-24)."""
+    seg = Segmenter(close_on_sentence_end=False)
+    seg.on_word(word("validé.", 0))
+
+    assert seg.has_open_segment
+
+
+def test_an_end_of_turn_still_closes_a_segment_when_the_runtime_sends_one():
+    """Both rules are live on moshi-server; whichever fires first wins."""
+    seg = Segmenter()
+    seg.on_word(word("Bonjour", 0))
+    events = seg.on_end_of_turn(EndOfTurnEvent(at_ms=500, probability=0.9))
+
+    assert events[0].reason == "end_of_turn"
+
+
+def test_a_runtime_with_a_vad_keeps_the_slice_1_to_3_closing_behaviour():
+    """The fake emits end-of-turn, so it gets no punctuation fallback.
+
+    This is the assertion that catches the wiring slip where a missing
+    capability defaulted to "no VAD" and silently moved every scripted phrase's
+    closing point.
+    """
+    from mosaique.speech.adapters.fake import FakeASRSession
+
+    seg = Segmenter(close_on_sentence_end=not FakeASRSession().emits_end_of_turn)
+    seg.on_word(word("commencer.", 0))
+
+    assert seg.has_open_segment
+    assert seg.on_end_of_turn(EndOfTurnEvent(at_ms=300, probability=0.9))[0].reason == "end_of_turn"

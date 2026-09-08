@@ -1,0 +1,11 @@
+{
+  "title": "Slice 4 smoke test — one French speaker, real time, real model",
+  "speed": 1.0,
+  "participants": [
+    {
+      "display_name": "Ayman",
+      "pcm": "../../../tests/fixtures/audio/fr-slice4.pcm",
+      "start_ms": 0
+    }
+  ]
+}
