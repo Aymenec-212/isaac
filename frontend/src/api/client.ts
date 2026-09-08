@@ -62,9 +62,30 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export type TranscriptResponse = components["schemas"]["TranscriptResponse"];
 export type OutputsResponse = components["schemas"]["OutputsResponse"];
 export type JoinResponse = components["schemas"]["JoinResponse"];
+export type ReadinessResponse = components["schemas"]["ReadinessResponse"];
+export type DependencyView = components["schemas"]["DependencyView"];
 
 export const api = {
   livez: () => request<{ status: string; version: string }>("/livez"),
+
+  /**
+   * Which dependencies are up (tech spec 15).
+   *
+   * Not routed through `request`, because a 503 is the *expected* answer when
+   * something is down and `request` would turn it into a thrown ApiError. The
+   * body is the same shape either way and it is the body we want.
+   *
+   * No token: the health endpoints are the deliberate unauthenticated
+   * exception, since a load balancer has no credentials and neither does
+   * someone debugging a local run.
+   */
+  readiness: async (): Promise<ReadinessResponse> => {
+    const response = await fetch(`${BASE}/readyz`);
+    if (response.status !== 200 && response.status !== 503) {
+      throw new ApiError("HEALTH_UNAVAILABLE", "État du serveur inconnu.", "", response.status);
+    }
+    return (await response.json()) as ReadinessResponse;
+  },
   listMeetings: () => request<{ meetings: Meeting[] }>("/meetings"),
   getMeeting: (id: string) => request<MeetingDetail>(`/meetings/${id}`),
   createMeeting: (title: string) =>

@@ -97,8 +97,8 @@ uv venv && uv pip install -e ".[dev]"
 uv run alembic upgrade head
 uv run python -m mosaique.app.seed            # prints a host token
 uv run uvicorn mosaique.app.main:create_app --factory --reload --port 8000
-uv run pytest -q                              # 315, 1 deselected
-uv run pytest -q -m "not integration"         # 258, no database needed
+uv run pytest -q                              # 343, 1 deselected
+uv run pytest -q -m "not integration"         # 276, no database needed
 uv run pytest -q -m slow                      # the accelerated hour, ~70 s
 uv run ruff check . && uv run ruff format .
 uv run mypy                                   # strict
@@ -145,17 +145,28 @@ and realtime against real PostgreSQL, 49 frontend unit, 2 Playwright specs —
 plus a 60-minute accelerated run behind `-m slow` that passes at 54.8x realised
 with no memory growth.
 
-**Slice 5 built:** the OpenAI provider behind the existing `LLMProvider` seam
-(strict structured outputs, retries, fail-fast config), `GET
-/meetings/{id}/audio/{session_id}` with Range support, and a review page where a
-decision's citation scrolls to the segment and plays the moment it was said.
-Spike D was run and said an hour of French fits one context window, so
-chunk-and-merge was deliberately not built.
+**Slice 5 works against the real provider** — confirmed by Aymen on 2026-09-08.
+The OpenAI adapter, strict structured outputs, the FR-11 audio route and the
+evidence-linked review page all function end to end. What is **not** measured:
+the ten-meeting run, A-6's schema-rejection rate split by reason, and cost per
+meeting (L-31). One good run is not a rate.
 
-**No real LLM call has ever been made from this codebase** (L-31). Every test
-runs on a fake transport, which is the seam working — and which cannot tell you
-OpenAI accepts the body we build. Ten real meetings with a key close the gate
-and answer A-6; the commands are in `PROJECT_STATE.md` §12.
+**The plan was re-sequenced on 2026-09-08 into three phases.** Read
+`docs/IMPLEMENTATION_PLAN.md` v1.3 before picking up work:
+
+- **Phase A — now.** Slice 6A: harden the complete single-user product on
+  M1 + MLX. Health endpoints per dependency, transcript search, a long run
+  against the real runtime, full-lifecycle tests, degraded-state UX.
+- **Phase B.** Slice 6B: deploy `moshi-server` on a dedicated NVIDIA host and
+  measure the production serving path. Blocked on hardware, not on code.
+- **Phase C.** Slice 6C: four participants, with the original Slice 6 exit gate
+  carried over unchanged.
+
+**Slice 6 was split, not reduced.** Four participants, concurrent ASR, CUDA
+validation and GPU benchmarking are all postponed and all still tracked. **L-26
+— MLX serves one stream per process — is therefore no longer an immediate
+blocker**: it is sufficient for Phase A and disqualifying for Phase C, and the
+only thing that changed is which one is next.
 
 **Real French audio has now been transcribed end to end, once.** 116.36 s
 through the running app-server against real MLX Kyutai on Apple silicon,
@@ -178,12 +189,17 @@ meanwhile; Slice 5 builds no special case around it. Do not reopen it
 unprompted, and do not encode its suspected cause anywhere — that is still a
 hypothesis.
 
-Still open, all hardware: Spike B2 and A-3 (a CUDA host, also the only way to
-test `moshi_server`, `EndOfTurnEvent` and A-16), the cross-network run (A-8),
-Spike A, and the GPU half of A-9.
+Still hardware-blocked, now explicitly Phase B/C rather than open-ended: A-3 and
+A-16 and `moshi_server` and `EndOfTurnEvent` (a CUDA host), the cross-network run
+(A-8), Spike A, and the GPU half of A-9.
 
-Next: **close Slice 5's gate** (ten real meetings, one API key), then Slice 6.
-Start from `PROJECT_STATE.md` §12.
+**Say where, not just whether.** `PROJECT_STATE.md` §0 now carries a
+validation-environment vocabulary — ✅ M1 + MLX, ✅ fake, ⚠ implemented-not-
+validated, ❌ needs NVIDIA, ❌ needs cross-network — because a number measured on
+MLX does not describe CUDA (A-16). **Never mark the production GPU serving path
+verified until it has actually served a meeting.**
+
+Next: **Slice 6A**. Start from `PROJECT_STATE.md` §12.
 
 ---
 

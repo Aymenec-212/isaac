@@ -144,3 +144,23 @@ class EndMeetingResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     version: str
+
+
+class DependencyView(BaseModel):
+    """One dependency's state (tech spec 15, `/health/deps`)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    state: str
+    detail: str
+    # Carried in the response rather than left implicit, so a reader can see
+    # *why* a failing LLM provider did not make the instance unready.
+    gates_readiness: bool
+
+
+class ReadinessResponse(BaseModel):
+    status: str
+    version: str
+    summary: str
+    dependencies: list[DependencyView]

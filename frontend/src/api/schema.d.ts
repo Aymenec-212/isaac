@@ -24,6 +24,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readyz
+         * @description Could this instance take a meeting right now? (tech spec 15.)
+         *
+         *     503 when not, with the reason in the body — a load balancer needs the
+         *     status code, and the person reading the logs afterwards needs the sentence.
+         */
+        get: operations["readyz_readyz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/deps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health Deps
+         * @description Per-dependency detail. Always 200 — this endpoint reports, it does not judge.
+         *
+         *     Separate from `/readyz` because they are read by different things: a load
+         *     balancer wants a status code, and a person wants to know which of three
+         *     dependencies is the one that is broken.
+         */
+        get: operations["health_deps_health_deps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/meetings": {
         parameters: {
             query?: never;
@@ -233,6 +280,20 @@ export interface components {
             /** Invite Url */
             invite_url: string;
         };
+        /**
+         * DependencyView
+         * @description One dependency's state (tech spec 15, `/health/deps`).
+         */
+        DependencyView: {
+            /** Name */
+            name: string;
+            /** State */
+            state: string;
+            /** Detail */
+            detail: string;
+            /** Gates Readiness */
+            gates_readiness: boolean;
+        };
         /** EndMeetingResponse */
         EndMeetingResponse: {
             meeting: components["schemas"]["MeetingView"];
@@ -372,6 +433,17 @@ export interface components {
             /** Role */
             role: string;
         };
+        /** ReadinessResponse */
+        ReadinessResponse: {
+            /** Status */
+            status: string;
+            /** Version */
+            version: string;
+            /** Summary */
+            summary: string;
+            /** Dependencies */
+            dependencies: components["schemas"]["DependencyView"][];
+        };
         /** SegmentView */
         SegmentView: {
             /** Id */
@@ -445,6 +517,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    readyz_readyz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadinessResponse"];
+                };
+            };
+        };
+    };
+    health_deps_health_deps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadinessResponse"];
                 };
             };
         };

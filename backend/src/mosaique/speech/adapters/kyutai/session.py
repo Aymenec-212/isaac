@@ -22,6 +22,7 @@ from mosaique.speech.interfaces import (
     AsrIdentity,
     ASRSessionConfig,
     AudioChunk,
+    RecognizerReadiness,
 )
 
 log = logging.getLogger(__name__)
@@ -156,6 +157,8 @@ class KyutaiRecognizer:
     def __init__(self, backend_factory: Callable[[], KyutaiBackend]) -> None:
         self._backend_factory = backend_factory
         self._identity: AsrIdentity | None = None
+        self._warmed: str | None = None
+        self._warm_error: str | None = None
 
     @property
     def identity(self) -> AsrIdentity | None:
@@ -171,11 +174,52 @@ class KyutaiRecognizer:
 
         A no-op for a runtime with nothing to warm; `moshi_server` connects
         per session and has nothing to do here.
+
+        Records the outcome so `readiness()` can answer without repeating the
+        work: on MLX the warm-up is a 284-second model load, and a health
+        endpoint that triggered one would be a denial-of-service button.
         """
         backend = self._backend_factory()
         warm = getattr(backend, "preload", None)
-        if warm is not None:
+        if warm is None:
+            self._warmed = "nothing to warm"
+            return
+        try:
             await warm()
+        except Exception as exc:
+            # Kept, not swallowed: a failed load is exactly what `/readyz` is
+            # for, and the reason belongs in the response rather than only in a
+            # log line nobody reads until after the meeting.
+            self._warm_error = f"{type(exc).__name__}: {exc}"
+            raise
+        self._warmed = "weights loaded"
+
+    async def readiness(self) -> RecognizerReadiness:
+        """Whether this runtime could take a meeting right now.
+
+        Reports what `preload()` actually observed rather than probing again.
+
+        `moshi_server` returns **unknown**, not ready: its readiness is a
+        property of a remote server nobody has ever reached (L-27), and
+        answering "ready" for a thing never checked is how a health endpoint
+        becomes a liability. `/readyz` treats unknown as not-ready, so the gap
+        is visible until Slice 6B implements a real probe.
+        """
+        if self._warm_error is not None:
+            return RecognizerReadiness(state="not_ready", detail=self._warm_error)
+        if self._warmed is None:
+            return RecognizerReadiness(
+                state="unknown", detail="preload has not run; runtime unverified"
+            )
+        if self._warmed == "nothing to warm":
+            return RecognizerReadiness(
+                state="unknown",
+                detail=(
+                    "this runtime has nothing to preload, so readiness is a property "
+                    "of a remote server that has not been probed (Slice 6B)"
+                ),
+            )
+        return RecognizerReadiness(state="ready", detail=self._warmed)
 
     async def open_session(self, cfg: ASRSessionConfig) -> KyutaiSession:
         session = KyutaiSession(self._backend_factory())

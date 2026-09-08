@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { type JoinResponse, token } from "./api/client";
+import { HealthBanner } from "./health/HealthBanner";
 import { Mark } from "./meeting/Mark";
 import { JoinPage } from "./meeting/JoinPage";
 import { LiveMeeting } from "./meeting/LiveMeeting";
@@ -76,6 +77,11 @@ export default function App() {
       </aside>
 
       <main className="main">
+        {/* Above the view, not inside it: a dependency being down is true on
+            every screen, and the join page is exactly where someone most needs
+            to be told before they start talking. */}
+        <HealthBanner />
+
         {view.name === "join" ? (
           <JoinPage
             meetingId={view.meetingId}

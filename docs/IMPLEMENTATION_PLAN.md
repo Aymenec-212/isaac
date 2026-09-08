@@ -1,10 +1,53 @@
 # Mosaïque — Implementation Plan
 
-**Version:** 1.2 (prototype scope restored)
-**Date:** 2026-09-03
+**Version:** 1.3 (re-sequenced into Phases A/B/C — 2026-09-08)
+**Date:** 2026-09-03, re-sequenced 2026-09-08
 
 **Normative source:** Technical Specification v0.1 §18. This plan re-cuts that sequence into vertical slices; it does not change its scope. Future-architecture work (external platform ingress, LiveKit) is **not in this plan** — see `mosaique-future-media-plane-options.md`.
 **Method:** thin vertical slices. Every slice cuts through browser → gateway → runtime → ASR → database → UI and ends in something a person can watch happen.
+
+---
+
+## Phases: what is being built now, and what is being deferred
+
+Added 2026-09-08. Slices 0–5 shipped in order and are unaffected. What changed is
+the **order of what remains**, decided after Slice 5: the product is proven end to
+end for one participant on hardware that exists, and the four-participant goal is
+gated on hardware that does not. Rather than let the second stall the first, the
+remaining work splits into three phases.
+
+**Nothing is removed. Slice 6's requirements are re-sequenced, not reduced.**
+
+| Phase | Runtime | Objective | Status |
+|---|---|---|---|
+| **A — Local single-user product** | M1 + MLX Kyutai | One person can reliably conduct a complete meeting locally and trust the transcript and the meeting intelligence. Repeatably, not once. | **CURRENT FOCUS** |
+| **B — GPU / production ASR validation** | dedicated NVIDIA + `moshi-server` | Prove the production serving path and measure it: GPU memory, real-time factor, p50/p95 latency, sustained stability, concurrent capacity, 1/2/4-participant behaviour. | Blocked on hardware |
+| **C — Four participants** | the Phase B runtime | Demonstrate the original four-participant requirement and the rest of Slice 6's concurrency and load criteria. | Blocked on Phase B |
+
+**Why this order.** Phase A's work — search, health endpoints, degraded-state UX,
+lifecycle tests, long single-user runs — is product work that needs no GPU and
+was being held behind an infrastructure purchase. Phase B's measurements cannot
+be simulated and must not be guessed. Doing A first means the thing being
+deployed onto a GPU in Phase B is already known to work.
+
+**What this is not.** It is not a decision that four participants are out of
+scope, and not a claim that MLX is the production runtime. MLX serves one stream
+per process by design (L-26); that is sufficient for Phase A and disqualifying
+for Phase C, and both remain true.
+
+**The architecture does not move with the phases.** The seam is the whole point:
+
+```text
+Application → StreamingRecognizer → ASR implementation
+
+  Phase A (now):     Application → StreamingRecognizer → Kyutai MLX
+  Phase B/C (later): Application → StreamingRecognizer → Kyutai adapter
+                                                       → moshi-server → NVIDIA GPU
+```
+
+Swapping the runtime must not touch the meeting domain, the transcript domain, or
+any product-facing API. `tests/unit/test_architecture.py` fails the build if it
+would.
 
 ---
 
@@ -133,13 +176,94 @@ Spike A is informational and can happen any time. Spike C waits on Q2. Spike D i
 
 ---
 
-## Slice 6 — Four participants, observability, load
+## Slice 6 — split, 2026-09-08
 
-**A person can:** run a four-person meeting, and an operator can see whether the system is healthy.
+The original Slice 6 mixed two kinds of work: things one person needs on a laptop,
+and things that only a GPU can answer. They are separated below. **Every original
+requirement appears in exactly one of 6A or 6C; none was dropped.**
 
-**Inside:** the remaining metrics from §15 with a stated reason each; `/readyz` and `/health/deps`; four-participant replay under load; queue and GPU-memory tuning against Spike C numbers; transcript search (FR-10).
+Original inside, and where each part went:
 
-**Exit gate:** four-participant 30-minute replay with < 2% dropped frames and latency budgets met; all eight tech spec §1.3 success criteria mapped to named passing tests; every `[measure]` row in the ledger has a real number.
+| Original Slice 6 item | Now |
+|---|---|
+| the remaining §15 metrics, with a stated reason each | **6A** |
+| `/readyz` and `/health/deps` | **6A** |
+| transcript search (FR-10) | **6A** |
+| four-participant replay under load | **6C** |
+| queue and GPU-memory tuning against Spike C numbers | **6B** (measure) → **6C** (tune) |
+
+Original exit gate, and where each clause went:
+
+| Original clause | Now |
+|---|---|
+| all eight tech spec §1.3 success criteria mapped to named passing tests | **6A** for the seven a single participant can exercise; **6C** for the concurrency one |
+| every `[measure]` row in the ledger has a real number | **split**: single-stream rows in 6A, GPU and concurrency rows in 6B |
+| four-participant 30-minute replay, < 2% dropped frames, latency budgets met | **6C, unchanged** |
+
+---
+
+## Slice 6A — The single-user product, hardened (PHASE A — current)
+
+**A person can:** run a real meeting on their own machine, repeatedly, and trust
+what comes out — and when something is broken, see *which* thing is broken.
+
+**Inside:** transcript search (FR-10); `/readyz` and `/health/deps` reporting each
+dependency separately (database, ASR runtime, LLM provider); the remaining §15
+metrics with a stated reason each; degraded-state UX for every dependency that
+can be down; a long single-user run against the **real MLX runtime** rather than
+the fake; and a full-lifecycle test — create, join, speak, end, finalize,
+summarize, review — run end to end rather than in pieces.
+
+**Outside, deliberately:** anything needing a second concurrent stream. That is
+6C, and MLX cannot do it (L-26).
+
+**Exit gate:** a realistic single-user meeting can be run repeatedly on M1 + MLX
+with a trustworthy transcript and trustworthy outputs; search returns the right
+segments; `/readyz` distinguishes each dependency being down; the seven §1.3
+success criteria that do not require concurrency have named passing tests; every
+single-stream `[measure]` row has a real number.
+
+---
+
+## Slice 6B — GPU and production ASR validation (PHASE B)
+
+**Blocked on:** a dedicated NVIDIA host. This is a procurement item, not an
+engineering one, and it is the only thing standing between here and Phase C.
+
+**A person can:** nothing new. This slice produces numbers, not features — which
+is exactly why it must not be skipped or guessed at.
+
+**Inside:** deploy `moshi-server` on the GPU host; point `asr_runtime` at it by
+config alone (`MOSAIQUE_ASR_RUNTIME=moshi_server`, no code change — if any is
+needed, the seam is broken and that is the finding); then measure, on the real
+serving path: GPU memory usage; real-time factor; p50/p95 latency; sustained
+streaming stability over a long run; concurrent stream capacity; and 1 / 2 / 4
+participant behaviour.
+
+Also closes what only this hardware can close: A-3, A-4, the GPU half of A-9,
+A-16 (do MLX and CUDA transcripts agree?), and §9.3's `end_of_turn_threshold`,
+which is dead code on MLX because the `-mlx` weights carry no VAD heads.
+
+**Exit gate:** every number above measured and written into `PROJECT_STATE.md`
+§8, each labelled with the runtime it was measured on. The production serving
+path is **not** marked verified until it has actually served a meeting.
+
+---
+
+## Slice 6C — Four participants (PHASE C)
+
+**A person can:** run a four-person meeting, and an operator can see whether the
+system is healthy under that load.
+
+**Blocked on:** Slice 6B.
+
+**Inside:** four-participant replay under load; queue and GPU-memory tuning
+against the Slice 6B numbers; the §1.3 concurrency success criterion.
+
+**Exit gate — unchanged from the original Slice 6:** four-participant 30-minute
+replay with < 2% dropped frames and latency budgets met; all eight tech spec §1.3
+success criteria mapped to named passing tests; every `[measure]` row in the
+ledger has a real number.
 
 **This is the end of the prototype.** Slice 7 is the gate for real customer data.
 
@@ -156,14 +280,20 @@ Spike A is informational and can happen any time. Spike C waits on Q2. Spike D i
 ## Critical path and parallelism
 
 ```text
-Slice 0 ─► Slice 1 ─► Slice 2 ─► Slice 3 ─► Slice 4 ─► Slice 5 ─► Slice 6 ─► Slice 7
-                                              ▲          ▲
-Spike B ─► Spike C ───────────────────────────┘          │
-Spike D ─────────────────────────────────────────────────┘
-Spike A ── informational, any time
+        ┌──────────────── PHASE A: laptop ────────────────┐  ┌── PHASE B ──┐ ┌ PHASE C ┐
+Slice 0 ─► 1 ─► 2 ─► 3 ─► 4 ─► 5 ─► 6A ──────────────────────► 6B ─────────► 6C ─► Slice 7
+                          ▲     ▲                                 ▲
+Spike B ─► Spike C ───────┘     │                                 │
+Spike D ────────────────────────┘                    a dedicated NVIDIA host
+Spike A ── informational, any time                   (procurement, not code)
 ```
 
 Slices 0–3 have no external dependency: no GPU, no vendor, no answer to Q2. If Q2 stays open for weeks, the product path still reaches "working meeting on fake ASR with full failure handling", which is the honest majority of the engineering work.
+
+**That reasoning is what the 2026-09-08 re-sequencing extends.** Everything up to
+and including 6A runs on a laptop. The GPU is needed for exactly one thing —
+concurrency — and it now gates only the slice that actually needs it, instead of
+gating the product work queued behind it.
 
 ---
 
@@ -174,4 +304,7 @@ Slices 0–3 have no external dependency: no GPU, no vendor, no answer to Q2. If
 - **Spike B shows `moshi-server` cannot serve concurrent independent streams.** Then Slice 4 uses an in-process PyTorch adapter inside `asr-runtime` instead. The app-server is unchanged — that is what the adapter seam is for.
 - **Spike B shows the model retracts emitted text.** Then §9.3's segmenter and the client reconciler's revision rules both get more work, and X-14's append-only invariant is withdrawn.
 - **Slice 4 shows French WER on real meeting audio is unusable.** Then ADR-03 reopens. This is the single largest technical risk left in the prototype.
+- **Phase A finds a defect that makes the single-user product untrustworthy.** Then it is fixed inside 6A rather than deferred to the GPU phase, because Phase A's whole purpose is that one person can rely on the result. L-28 is the open candidate: deferred 2026-09-08 as an edge case, to be reassessed at the end of Slice 5 and only if it shows real impact on meeting outputs, evidence linking, or transcript correctness.
+- **The GPU host arrives sooner than expected.** Phase A still finishes first. Deploying a product that has not been made reliable for one user onto four is how you get four unreliable users.
+- **Phase B shows `moshi-server` needs application changes to swap in.** That is a seam failure and a finding in its own right — the config-only swap is the claim the architecture makes, and 6B is where it is tested for real.
 - **A trigger condition in ADR-12 §5 fires** — a pilot customer refuses to have guests run Mosaïque, or the product needs to speak in a meeting. Then a platform ingress becomes a real slice, added behind the D-04 seam. Not before.
