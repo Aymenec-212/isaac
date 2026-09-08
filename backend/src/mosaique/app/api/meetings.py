@@ -181,10 +181,15 @@ async def end_meeting(
     await session.flush()
     await session.commit()
 
-    await get_registry().finalize(meeting_id)
+    asr_version = await get_registry().finalize(meeting_id)
 
     meeting.state = str(MeetingState.COMPLETED)
     meeting.transcript_version = 1
+    # ADR-13 consequence 3: model, runtime and quantization together, or an
+    # MLX-era transcript and a CUDA-era one become indistinguishable and every
+    # WER comparison built on them is unsound.
+    if asr_version is not None:
+        meeting.asr_version = asr_version
     meeting.ended_at = datetime.now(UTC)
     await session.flush()
 

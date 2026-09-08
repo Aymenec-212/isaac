@@ -12,6 +12,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
+from mosaique.speech.interfaces.identity import AsrIdentity
+
 # Canonical audio frame: 80 ms of 24 kHz signed 16-bit mono (tech spec 8.1).
 SAMPLE_RATE_HZ = 24_000
 FRAME_DURATION_MS = 80
@@ -96,6 +98,16 @@ class ASRHealth:
 @runtime_checkable
 class ASRSession(Protocol):
     """One recognizer stream, one participant audio session."""
+
+    @property
+    def identity(self) -> AsrIdentity:
+        """What produced these words (ADR-13 consequence 3).
+
+        On the interface rather than on an adapter because the runtime writes
+        it to `Meeting.asr_version`, and the runtime is not allowed to know
+        which adapter it holds.
+        """
+        ...
 
     async def push_audio(self, chunk: AudioChunk) -> None: ...
 

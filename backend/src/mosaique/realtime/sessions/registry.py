@@ -57,13 +57,22 @@ class MeetingRegistry:
     def get(self, meeting_id: str) -> MeetingRuntime | None:
         return self._runtimes.get(meeting_id)
 
-    async def finalize(self, meeting_id: str) -> None:
+    async def finalize(self, meeting_id: str) -> str | None:
+        """Drain the runtime and report what produced its words.
+
+        The `asr_version` comes back rather than being written here so it lands
+        in the same transaction as `state=COMPLETED` and `transcript_version=1`
+        (tech spec 11 step 6). None means no runtime existed — nobody ever
+        connected — and the column is honestly left NULL.
+        """
         async with self._lock:
             runtime = self._runtimes.pop(meeting_id, None)
             self._ingresses.pop(meeting_id, None)
-        if runtime is not None:
-            await runtime.drain()
-            await runtime.stop()
+        if runtime is None:
+            return None
+        await runtime.drain()
+        await runtime.stop()
+        return runtime.asr_version
 
     async def close_sockets(self, *, code: int) -> None:
         """Hang up on everyone, with a code that says why (tech spec 14.1).

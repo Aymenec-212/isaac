@@ -1,14 +1,16 @@
 # PROJECT_STATE.md
 
 **Project:** Mosaïque — realtime meeting intelligence, French-first
-**Last updated:** 2026-09-08 (rev 10 — Spike B1 harness written, not run)
-**Updated by:** Spike B1 build session
-**Current slice:** **None in progress. Slice 3 is merged (PR #2) and VERIFIED.**
-Next is Slice 4 — real Kyutai, and ADR-13 puts **Spike B1** in front of it.
-B1's harness now exists (`backend/tools/spike_b1/`) and **has never been run**:
-it needs Apple silicon and this environment has none. Four items are open and
-none of them is code: Spike B1, the cross-network run (A-8), Spike A, and the
-GPU half of A-9. All four need hardware this environment does not have.
+**Last updated:** 2026-09-08 (rev 11 — Spike B1 run; Slice 4 built, unmeasured)
+**Updated by:** Slice 4 implementation session
+**Current slice:** **Slice 4 — real Kyutai. Code complete, gate not met.**
+Spike B1 ran on 2026-09-08 (`docs/spikes/B1-findings.md`) and unblocked it. The
+adapter, both runtimes, the latency decomposition and the retuned §9.3
+thresholds are merged and tested. **No real audio has been transcribed through
+the app-server yet:** the smoke test needs Apple silicon and this environment
+has none, so WER and p95 first-word latency are `AWAITING MEASUREMENT` in §8.
+Five items are open and none of them is code: the Slice 4 smoke test, the
+cross-network run (A-8), Spike A, the GPU half of A-9, and Spike B2.
 **Maturity level (skill §41):** Level 1 — functional prototype, multi-participant,
 fake models, failure behavior covered
 
@@ -46,11 +48,13 @@ the maintainer against a real browser and passed (L-12 closed). Slice 3's exit
 gate is met: every row of the tech spec §14.1 failure matrix that does not need
 a real model has a named passing test, and the accelerated hour passes.**
 
-**Four things are NOT done and are not claimed, none of them code:** Spike B1
-(its harness is written and has never been run), a cross-network run between two
-physical machines (A-8), Spike A, and the GPU half of A-9. **Everything from
-Slice 4 onward is still `SPECIFIED`, and no real audio has ever been transcribed
-by this system.**
+**Five things are NOT done and are not claimed, none of them code:** the Slice 4
+smoke test against the real model, a cross-network run between two physical
+machines (A-8), Spike A, the GPU half of A-9, and Spike B2. **Kyutai has now
+transcribed real French — but by the standalone Spike B1 probe, not through this
+application.** Nothing has yet gone microphone → gateway → runtime → adapter →
+model → transcript, so Slice 4's exit gate is not met and Slice 5 has not
+started.
 
 ---
 
@@ -61,12 +65,12 @@ by this system.**
 | Repository | `main` through PR #2 (Slice 3). Work branch `claude/awesome-ritchie-iu6uut`, restarted from `main` after each merge |
 | Runnable | yes — `docker compose up`, or uv + local PostgreSQL |
 | Deployed | no |
-| Real audio ever transcribed by this system | **no — every model in the path is a fake** |
-| Tests passing | **218**: 141 backend unit, 48 backend integration and realtime (real PostgreSQL), 27 frontend unit, 2 Playwright browser specs. Plus one opt-in accelerated hour behind `-m slow`. The 189 backend tests were run in this session on 2026-09-08; the 29 frontend and browser tests were not re-run and are carried forward from rev 9 |
-| Lint / types | ruff clean; mypy strict clean on 75 source files (the replay harness and Spike B1's two pure modules included); `tsc --noEmit` clean, carried forward from rev 9 |
+| Real audio ever transcribed by this system | **not through the app-server.** The Spike B1 probe transcribed 64 s of French directly (2026-09-08); the adapter that puts the same model behind `StreamingRecognizer` exists and is unmeasured end to end |
+| Tests passing | **289**: 212 backend unit, 48 backend integration and realtime (real PostgreSQL), 27 frontend unit, 2 Playwright browser specs. Plus one opt-in accelerated hour behind `-m slow`. The 260 backend tests, the 27 frontend tests and `npm run build` were all run in this session on 2026-09-08; the 2 Playwright specs were not re-run and are carried forward from rev 9. One realtime test failed once and did not reproduce — L-25 |
+| Lint / types | ruff clean; ruff format clean; mypy strict clean on 88 source files; `tsc --noEmit` clean; `openapi.json` regenerated with no drift |
 | Known gap | A-8 unvalidated: every run so far is loopback on one machine. Spike A not run. **No CI runs on this repository** — see L-18. |
-| Next action | **Spike B1** — run `backend/tools/spike_b1/probe.py` on Apple silicon and fill in `docs/spikes/B1-findings.md`. It is written and unrun. Slice 4 starts after it |
-| Next gate | Slice 4 exit: a 3-minute French fixture replayed at real time against the real model, with WER and p95 first-word latency measured and written into §8 |
+| Next action | **Slice 4 smoke test on Apple silicon.** The exact commands are in §12. It produces WER and p95 first-word latency, which are the two rows still `AWAITING MEASUREMENT` in §8 |
+| Next gate | Slice 4 exit: a 3-minute French fixture replayed at real time against the real model, with WER and p95 first-word latency measured and written into §8. **Code side done; measurement side open** |
 
 ---
 
@@ -162,7 +166,11 @@ by this system.**
 | `realtime/ingress/` MeetingIngress protocol | Blueprint D-04 | **VERIFIED** | `test_architecture.py` parses every downstream module for transport imports |
 | `speech/interfaces/` StreamingRecognizer | §9.1 | **VERIFIED** | `test_fake_and_kyutai_adapters_satisfy_the_same_protocol` |
 | `speech/adapters/fake/` | §9.1 | **VERIFIED** | drives all Slice 1 and Slice 2 flow tests |
-| `speech/adapters/kyutai/` | §9.2 | SPECIFIED | — | Slice 4 |
+| `speech/adapters/kyutai/` identity, pieces, backoff, session | §9.1, §9.2 | **VERIFIED** | `tests/unit/test_kyutai_adapter.py` (34) — identity and `asr_version`, streaming word assembly, bounded reconnect, health, lag, the ASR liveness check, and the moshi-server message translation against a fake transport |
+| `speech/adapters/kyutai/mlx_runtime.py` | ADR-13 | **IMPLEMENTED** | — | Needs Apple silicon; nothing in this environment can execute it. One stream at a time by design (L-26) |
+| `asr_runtime/moshi_ws.py` | §9.2 | **IMPLEMENTED** | — | Needs a CUDA host running `moshi-server`. The protocol logic it carries is tested; the socket and msgpack framing are not |
+| `asr_runtime/factory.py` runtime selection | ADR-13 | **VERIFIED** | `tests/unit/test_asr_runtime_selection.py` (5): default is fake, unknown runtime refused, `moshi_server` without a URL fails at startup |
+| `observability/latency.py` decomposition | Slice 4 | **VERIFIED** | `tests/unit/test_latency_decomposition.py` (7): per-hop attribution, the frame a word belongs to, the client-clock hop kept out of the total, bounded memory |
 | `transcript/segmenter.py` | §9.3 | **VERIFIED** | `tests/unit/test_segmenter.py` (12) |
 | `intelligence/` LLMProvider + schema | §12 | **VERIFIED** | `tests/unit/test_output_schema.py` (7) |
 | `persistence/` models, repos, migrations | §4 | **VERIFIED** | migration `0001` applies from empty; `test_all_eight_tables_exist_in_migration_one`, `test_meeting_survives_a_new_session` |
@@ -231,16 +239,16 @@ Mirrors blueprint §5. Status here is the live one.
 | # | Assumption | Risk if false | Validated by | Status |
 |---|---|---|---|---|
 | A-1 | Browser AEC suppresses far-end audio from another app | Prototype meetings need headphones | Spike A (informational) | UNVALIDATED, non-blocking. Needs two machines and real microphones; the join page still carries the Slice 1 headphone guidance unchanged |
-| A-2 | Kyutai: 24 kHz, 80 ms, word timestamps, semantic VAD, no retraction | Audio format + segmenter change | Spike B1 | **MOSTLY CONFIRMED (D-05)** — retraction still open. `backend/tools/spike_b1/` is written and has never been run; it needs Apple silicon. Its retraction detector is unit-tested against a synthetic retraction, so a clean result will mean it looked, but the measurement itself does not exist yet |
+| A-2 | Kyutai: 24 kHz, 80 ms, word timestamps, semantic VAD, no retraction | Audio format + segmenter change | Spike B1 | **CLOSED 2026-09-08, partly against itself.** 24 kHz/80 ms confirmed; word timestamps derived not emitted; **no retraction** in 825 steps (X-14 stands for MLX — append-only by construction on this API, not proven of the model); and **the semantic VAD is absent on the `-mlx` weights**, which is the half of the assumption that was wrong and the reason §9.3 grew a punctuation rule |
 | A-3 | `moshi-server` handles concurrent streams | Fall back to PyTorch adapter | Spike B2 | UNVALIDATED — **the main Spike B2 question**, and B1 cannot touch it: concurrency is a property of the serving runtime, not the model. Needs CUDA (ADR-13 M-4) |
 | A-4 | One GPU sustains 4 real-time streams | Ceiling and cost change | Spike C (half day) | **LARGELY ANSWERED** — vendor figure ~400 real-time streams per H100; confirm on our hardware |
-| A-12 | Flush trick available through the adapter | Final-segment latency reverts to model delay | Spike B1, then Slice 4 | UNVALIDATED. B1 measures the realised speed factor, which is what decides it: below ~1.5x there is nothing for `flush()` to catch up with and the answer is negative **for MLX only** |
+| A-12 | Flush trick available through the adapter | Final-segment latency reverts to model delay | Spike B1 | **ANSWERED NEGATIVELY for MLX, 2026-09-08.** 1.24x realised, below the 1.5x it needs. `MlxBackend.flush()` pushes silence and waits rather than accelerating. Still open for `moshi_server`, which has the `Marker` primitive but no hardware to run on |
 | A-5 | 60-min transcript fits one LLM context | Chunking moves into Slice 5 | Spike D | UNVALIDATED |
 | A-6 | LLM returns valid `evidence_segment_ids` | Evidence linking softens | Slice 5 | UNVALIDATED |
 | A-7 | Worklet resampling is cheap on mid-range laptops | Resample server-side | Slice 1 | UNVALIDATED — the e2e runs the worklet but measures no CPU cost |
 | A-8 | 12.5 frames/s per participant survives real networks | Batch or enlarge frames | Slice 2 | **UNVALIDATED — the one Slice 2 exit-gate item still open.** Every run so far is loopback on one machine. `tools/replay --base-url` against a second machine is the test; it has not been run |
 | A-9 | 30 s ASR grace does not leak GPU memory | Shorten grace | Slice 3 | **PARTIAL** — `test_an_hour_of_meeting_does_not_grow_the_runtime` measures 0.0 MB of tracked growth across an accelerated hour on the *fake* recognizer. There is no GPU in the path yet, so the GPU half is still open until Slice 4 |
-| A-10 | French WER is good enough to be useful | Model swap | Slice 4 | UNVALIDATED |
+| A-10 | French WER is good enough to be useful | Model swap | Slice 4 smoke test | **UNVALIDATED — AWAITING MEASUREMENT (Aymen).** B1 saved no reference transcript, so no WER exists. The transcript it did produce is fluent, correctly punctuated French, which is encouraging and is not a number |
 | A-11 | "Joining is consent" satisfies FR/EU law | Consent flow and DPA change | legal counsel | **UNVALIDATED — not an engineering question** |
 | A-14 | Slice 3's thresholds hold against a recognizer whose timing is not a fixed script | Reconnect grace, idle close, overload window and gap threshold all need retuning together | Slice 4 | **UNVALIDATED.** Every one of them has only ever been exercised against `FakeRecognizer`, which emits a scripted line at a fixed delay. A real model's jitter is the thing these values exist to absorb, and none of it has been seen yet |
 | A-15 | Per-participant runtime tasks do not corrupt shared state | A concurrency bug that no fast test can see | Slice 3 | **PARTIALLY VALIDATED, and it already failed once.** The persistence buffer was shared across participant pumps and dropped a broadcast segment; found by the two-stream accelerated hour, not by the unit suite. Other shared runtime state — the roster, `_stream_status`, `_file_frames` — is mutated from the same tasks and has no equivalent test |
@@ -255,13 +263,14 @@ Every `[measure]` placeholder in the technical specification. A value here means
 
 | Parameter | Current value | Source | Status |
 |---|---|---|---|
-| First-word latency p95 target | 2.0 s | guess | UNMEASURED |
-| Final-segment latency p95 target | 3.5 s | guess (blueprint X-4) | UNMEASURED |
+| First-word latency p95 target | 2.0 s | guess | **AWAITING MEASUREMENT — Aymen.** Against the real model at 1x. The replay harness reports it; nothing measured on the fake belongs in this row |
+| Final-segment latency p95 target | 3.5 s | guess (blueprint X-4) | **AWAITING MEASUREMENT — Aymen.** Expect it to be worse on MLX than the fake predicted: with no flush trick, close latency starts at the model delay |
 | Reconnect grace | 30 s | guess | UNMEASURED |
-| ASR event timeout | 5 s | guess | UNMEASURED |
-| End-of-turn probability threshold | 0.5 | guess | UNMEASURED |
-| Silence threshold for segment close | 700 ms | guess | UNMEASURED |
-| Segment duration cap | 15 s | guess | UNMEASURED |
+| ASR event timeout | 5 s | guess | UNMEASURED, and **re-specified**. Taken literally ("no event for 5 s") it fires on any pause, because most MLX steps emit nothing — 663 of B1's 825. It is now a liveness check on frames *processed*, which is the question actually being asked. `test_a_recognizer_that_stops_consuming_is_reported_not_hidden` |
+| End-of-turn probability threshold | 0.5 | guess | **UNMEASURABLE ON MLX, unchanged.** The `-mlx` weights carry no VAD heads, so no `EndOfTurnEvent` is ever produced and the threshold is dead code on the development runtime. It becomes measurable on `moshi_server`, whose `Step` messages carry a VAD signal — Spike B2 |
+| Silence threshold for segment close | **1 200 ms** (was 700 ms) | measured 2026-09-08 by Aymen on Apple M1, `docs/spikes/B1-findings.md` | **MEASURED, THINLY.** Raised because 700 ms split a phrase six times in 64 s of French. The speaker's largest mid-phrase gap is 1 120 ms and their shortest real sentence break is 880 ms, so the distributions overlap and **no silence threshold separates them** — which is why the punctuation rule below exists. One speaker, one 64 s recording; a second fixture can move it. Pinned by `test_segmentation_against_real_audio.py` |
+| Segment duration cap | 15 s | guess | UNMEASURED, unchanged. Longest natural segment observed was 12.7 s, so nothing in B1 exercised the cap. `test_no_segment_reaches_the_duration_cap` fails the day a fixture does |
+| Sentence-final punctuation closes a segment | **new rule, on** | measured 2026-09-08 by Aymen on Apple M1, `docs/spikes/B1-findings.md` | **MEASURED, THINLY.** All 3 mid-transcript `.` marks landed on real boundaries with no false positive; commas were checked separately and are followed by 0-640 ms gaps, mid-phrase. Added because §9.3's primary rule (end-of-turn) does not exist on MLX. Risk not ruled out by one fixture: `M.`, `etc.` (L-24) |
 | Finalize drain deadline | 20 s | guess | UNMEASURED |
 | Outputs ready after end | 90 s | guess | UNMEASURED |
 | Queue depth: normal / lagging / full | 25 / 62 frames | guess | UNMEASURED |
@@ -269,6 +278,11 @@ Every `[measure]` placeholder in the technical specification. A value here means
 | Idle timeout closing AudioSession | 30 s | derived from D-02 | UNMEASURED. Exercised by `test_idle_and_pause.py` at a shortened value; the 30 s itself is still a guess |
 | Segments held while the database is unreachable | 200 | guess (tech spec 14.1) | UNMEASURED. Nobody has measured how long 200 segments buys, or what a real outage lasts |
 | Missing-frame run that earns a gap marker | 2 000 ms | guess (tech spec 8.3) | UNMEASURED. Below it a lost packet is padded silently; the threshold has only been exercised against fixed-size synthetic gaps |
+| MLX realised speed factor | **1.24x** (1.29x excluding first-call compilation) | measured 2026-09-08 by Aymen on Apple M1, `docs/spikes/B1-findings.md` | MEASURED on Apple M1/9 GB under memory pressure. p50 59.4 ms per 80 ms step, p95 75.2 ms, 23 of 825 steps over budget. One sample, not re-run |
+| MLX model load, cold | **284 s** | same run | MEASURED. Why the app-server preloads the weights at startup instead of inside the first meeting |
+| Kyutai model delay | **500 ms** | read from `config.stt_config.audio_delay_seconds` | **CONFIRMED, not assumed.** Was a model-card figure; now read from the build |
+| Silence prefix the build expects | **0 ms** | read from `config.stt_config.audio_silence_prefix_seconds` | CONFIRMED. No timestamp shift is needed |
+| `Meeting.asr_version` on MLX | **`kyutai/stt-1b-en_fr@mlx-bf16`** | measured 2026-09-08 by Aymen on Apple M1, `docs/spikes/B1-findings.md` | MEASURED. **bf16, not the `q4` ADR-13 used as its example** — the `-mlx` repo ships `model.safetensors` |
 | Concurrent streams per GPU | ~400/H100 (vendor figure) | Kyutai docs | UNCONFIRMED ON OUR HARDWARE |
 | Replay realised speedup at `--speed 10` | 4.17x — 20 s of stream in 4.8 s wall | `tools/replay`, 2 streams, 2026-09-06 | MEASURED. The ceiling is the harness pacing and loopback, not the runtime |
 | First-word latency p95, 1x, 2 participants | 915 ms | replay report, 2026-09-06 | MEASURED — **fake recognizer over loopback**. Dominated by the fake's 500 ms scripted model delay. Not the NFR and not a prediction of it |
@@ -277,8 +291,8 @@ Every `[measure]` placeholder in the technical specification. A value here means
 | Accelerated hour, 2 participants at `--speed 60` | 65.7 s wall for 3 600 s of stream — **54.8x realised** | `tests/realtime/test_long_run.py`, 2026-09-07 | MEASURED. The earlier ~3.3x figure was the harness generating its own audio, not the runtime |
 | Tracked memory growth over an accelerated hour | **0.0 MB** | same run, `tracemalloc` around the whole replay | MEASURED on the **fake** recognizer. Nothing in the realtime path grows with meeting length; A-9's GPU half is still open until Slice 4 |
 | Frames dropped, 2 participants at 10x | 0 of 250 per stream | `audio_sessions.frames_dropped` after a CLI replay, 2026-09-06 | MEASURED on loopback. A-8 is about real networks and is still open |
-| Segment-close latency with vs. without flush trick | unknown | — | UNMEASURED |
-| French WER on real meeting audio | unknown | — | UNMEASURED |
+| Segment-close latency with vs. without flush trick | **no flush trick on MLX** | measured 2026-09-08 by Aymen on Apple M1, `docs/spikes/B1-findings.md` | **A-12 ANSWERED NEGATIVELY for MLX.** D-05 assumes several times real time; MLX realised **1.24x**, so there is nothing to catch up with and close latency reverts to the ~500 ms model delay. `moshi_server` has the `Marker` primitive for it, unverified |
+| French WER on real meeting audio | unknown | — | **AWAITING MEASUREMENT — Aymen.** Blocked on a reference transcript: B1's fixture was not transcribed by hand. The smoke test in §12 produces the number |
 | Cross-talk misattribution rate (speakerphone) | unknown | — | UNMEASURED |
 
 ---
@@ -295,8 +309,13 @@ Every `[measure]` placeholder in the technical specification. A value here means
 | `e2e/two-participants.spec.ts` | two browsers, merged attributed transcript, roster, speaking indicator | **1 passing**; confirmed on the maintainer's machine 2026-09-07 |
 | `tests/realtime/` | reconnect and resume (4), transport health (2), idle and pause (2), gap markers (2), degraded persistence (3), graceful shutdown (2), failure matrix through the harness (3) | **18 passing** |
 | `tests/realtime/test_long_run.py` | an accelerated hour, for memory stability (A-9) | **1 passing** in ~70 s; deselected by default — `uv run pytest -m slow` |
-| smoke (real model) | WER + latency on French fixture | NOT WRITTEN — Slice 4 |
+| smoke (real model) | WER + p95 first-word latency on a French fixture through the app-server | **NOT RUN — needs Apple silicon.** The harness, the scenario (`tools/replay/scenarios/french-real.json`) and the commands (§12) all exist |
 | cross-network run (A-8) | two physical machines, one meeting | **NOT RUN** — needs a second machine. `tools/replay --base-url` is the harness for it |
+| `tests/unit/test_segmentation_against_real_audio.py` | the retuned §9.3 thresholds replayed through the real `Segmenter` over Spike B1's measured word timings | **5 passing.** Asserts the speaker's four sentences come out whole, that the old 700 ms threshold split phrases, and that **no** silence-only threshold reproduces them |
+| `tests/unit/test_kyutai_adapter.py` | the Kyutai adapter with no Kyutai: identity, piece assembly, backoff, session health and liveness, moshi-server protocol translation | **34 passing** |
+| `tests/unit/test_latency_decomposition.py` | the `capture -> ... -> broadcast` stages | **7 passing** |
+| `tests/unit/test_asr_runtime_selection.py` | ADR-13 runtime selection, fail-fast | **5 passing** |
+| `tests/unit/test_replay_fixtures.py` | a real WAV into the harness, and the wrong format refused | **6 passing** |
 | `tests/unit/test_spike_b1_analysis.py` | what Spike B1 concludes from a token log: retraction detection, word assembly and timing, speed verdict, `asr_version`, VAD rising edges, the report shape | **37 passing.** Covers the reasoning, not the model — `probe.py` itself is untested and untestable here |
 | Spike B1 (`backend/tools/spike_b1/probe.py`) | retraction, realised speed factor, quantization and identity, event shape | **WRITTEN, NEVER RUN.** Needs Apple silicon; this environment has none. Findings template at `docs/spikes/B1-findings.md` is empty |
 | Spike B2 | concurrent independent streams, GPU capacity | **NOT RUN** — needs a CUDA machine (ADR-13 M-4, M-6) |
@@ -332,6 +351,10 @@ Current, as of planning. Each is a deliberate choice, not an oversight.
 | L-20 | A gap segment is a real row with empty text and its own status | The alternative was an omission, which is indistinguishable from "nobody spoke". Downstream consumers must therefore skip `status='gap'` when concatenating transcript text — the Slice 5 prompt builder is the next one that will care | Slice 5 |
 | L-21 | The reconnect grace and the idle close are both 30 s and can race | A socket that drops and never returns finalizes once, whichever timer wins, because both paths remove the session before finalizing. The behaviour is correct but the coincidence is not designed — the two values are independent `[measure]` guesses that happen to match | Slice 4, when both are tuned against real audio |
 | L-18 | **No CI exists in the repository.** rev 4 recorded "CI added, including a contract-drift job"; there is no `.github/` directory on `main` or on any branch, and none is gitignored. PR #1 has zero check runs | Found 2026-09-06 while checking the PR. Whatever was written in Slice 0 was never committed — the same failure mode as `store.py`, minus the gitignore rule to explain it | Every claim depending on it is now local-only: `ruff`, `mypy`, `pytest`, `npm test`, `npm run build` and the OpenAPI drift check pass on a developer's machine and nowhere else. Restoring CI is Slice 0 work; it is named here rather than folded into a feature slice |
+| L-24 | The sentence-end rule will split a French abbreviation | `M.`, `Mme.`, `etc.` end in a period without ending a sentence. None occurred in B1's 64 s, so the risk is real but unmeasured. The rule is a `Segmenter` argument, so turning it off is configuration rather than a code change | A fixture contains one, or a second speaker is measured |
+| L-25 | `test_one_participant_dropping_does_not_disturb_the_other` failed once and has not been reproduced | Seen on the first full run after the Slice 4 changes; no output was captured. Then 5 further full runs, 6 targeted full-suite runs of the realtime+integration pair, and 6 isolated runs all passed — 17 clean runs, 1 failure, **mechanism not established**. It is the same harness-driven family as L-22 and the same shared-database suspicion applies, but that is a hypothesis, not a finding. It is recorded rather than dismissed because the alternative reading — that the new `sentence_end` rule shifted when a segment closes relative to the injected disconnect at 6 400 ms — cannot be ruled out without a reproduction | Next time it fires. If it becomes frequent, give the harness modules separate databases (the L-22 remedy) before looking anywhere else |
+| L-26 | The MLX runtime serves one stream at a time per process | `LmGen` holds the per-stream KV cache while the weights are shared, so two concurrent MLX sessions would interleave caches and corrupt both transcripts with nothing logged. A second session is refused with an error naming `moshi_server` instead. Slice 4 is single-stream by design and concurrency is A-3, which only a real serving runtime can answer | Spike B2, or four-participant work in Slice 6 |
+| L-27 | Nothing in the Kyutai path has been executed against a model in this environment | `mlx_runtime.py` needs Apple silicon and `asr_runtime/moshi_ws.py` needs a CUDA host. Both are `IMPLEMENTED`, not `VERIFIED`; what is tested is everything either one can be separated from | The §12 smoke test closes the MLX half; Spike B2 closes the other |
 | L-17 | `frontend/node_modules/` is tracked in git (4191 files) | Pre-existing; `.gitignore` covers new files but the old entries are still indexed, so an `npm install` dirties the tree. `__pycache__` was untracked on 2026-09-06 — 38 `.pyc` files, unambiguously build output, and they re-dirtied on every test run. `node_modules` is left alone: untracking it changes how a fresh checkout is bootstrapped, which is a call to make on its own | A deliberate decision about how dependencies are vendored |
 
 ---
@@ -340,6 +363,7 @@ Current, as of planning. Each is a deliberate choice, not an oversight.
 
 | Date | Change |
 |---|---|
+| 2026-09-08 | **rev 11. Spike B1 run; Slice 4 built but not measured.** B1 ran on an M1 and closed A-2 partly against itself: no retraction in 825 steps, 24 kHz/80 ms confirmed, the 500 ms delay and a 0 ms silence prefix **read from the build** rather than assumed — and **the semantic VAD absent from the `-mlx` weights**, which was the half of A-2 nobody expected to be wrong. A-12 answered **negatively**: 1.24x realised, so the D-05 flush trick has nothing to catch up with on MLX. Then Slice 4: the Kyutai adapter behind `StreamingRecognizer` with `mlx` and `moshi_server` backends chosen by typed config; bounded reconnect; `health()`; the `capture -> gateway_recv -> dequeue -> asr_first_event -> broadcast` decomposition; `Meeting.asr_version` recording model, runtime **and** quantization. §9.3 was retuned against B1's real word timings *before* the adapter was written, and the retune found something the fake could never have shown: this speaker's largest mid-phrase pause (1 120 ms) is longer than their shortest real sentence break (880 ms), so **no silence threshold separates them**, and the 700 ms default was splitting phrases six times a minute. Silence moved to 1 200 ms and sentence-final punctuation became a closing rule — necessary because on MLX there is no end-of-turn event to fall back on. Backend suite 189 -> 260 with **no Slice 1-3 test modified**, which is the seam's proof. Two deviations recorded rather than smuggled: the ASR timeout is now a liveness check on frames *processed*, because "no event for 5 s" fires on any pause when 663 of 825 steps emit nothing; and `moshi-server`'s socket lives in a new `asr_runtime/` package because `speech/` may not import a transport, with two new architecture tests holding both halves of that. **Nothing in the model path has been executed here** (L-27): WER and p95 first-word latency are `AWAITING MEASUREMENT` against Aymen, and one Slice 3 test failed once and did not reproduce in 17 further runs (L-25). |
 | 2026-09-08 | **rev 10. Spike B1's harness written; nothing measured.** `backend/tools/spike_b1/` is a PEP 723 script that runs `kyutai/stt-1b-en_fr-mlx` over a French fixture and prints four answers — retraction, realised speed factor, quantization and identity, event shape — plus `docs/spikes/B1-findings.md` as an empty template. **It has never been executed anywhere.** It cannot be: MLX needs Apple silicon. What *is* proven is everything it concludes: the token-log reasoning lives in two MLX-free modules with 37 passing tests (`tests/unit/test_spike_b1_analysis.py`), including a synthetic retraction the detector is required to catch — without that, "no retraction observed" would be indistinguishable from a detector that cannot see. Backend suite 152 -> 189, all run on 2026-09-08. Three smaller things, each recorded where it belongs: ADR-13 was accepted on 2026-09-07 but had never reached §2, so it is there now; `mlx` and `mlx_lm` joined `MODEL_MODULES` in the architecture test per ADR-13 consequence 4, before any adapter exists to need it; and ADR-13 M-7's new assumption is recorded as **A-16**, not the "A-14" the ADR asks for, because A-14 was already taken by Slice 3's threshold assumption. MLX never enters `backend/pyproject.toml` (ADR-13 consequence 5) — the spike is a standalone script with its own throwaway environment, which is also why `test_architecture.py` stays green with a model library in the repository. |
 | 2026-09-03 | Created. Q1 closed → companion mode. D-02 timeline model added. Blueprint amendments A-1…A-10 recorded. Nothing implemented. |
 | 2026-09-03 | rev 2. Platform research folded into prototype scope. **Reverted in rev 3 as scope creep.** |
@@ -417,34 +441,83 @@ Every item, with the test that proves it. All of `tests/realtime/` is new.
 * Concurrency has thin coverage in the fast suite — see A-15. The one bug found
   there was found by the hour-long test, not by the 152 that run in a minute.
 
-### Slice 4 — what comes next
+### Slice 4 — closing the gate on Apple silicon
 
-Read `docs/IMPLEMENTATION_PLAN.md` Slice 4 and tech spec §9.2 before starting.
-In short: apply Spike B's findings to §8.1 and §9.3 *before* writing the
-adapter, build the `asr-runtime` container, put Kyutai behind
-`StreamingRecognizer` with bounded reconnect backoff and `health()`, add the
-full latency decomposition, and tune the segmentation thresholds against real
-French audio with the replay harness.
+Everything below runs on the Mac. Nothing here has been executed by the
+implementation session, and the two numbers it produces are the two rows in §8
+still marked `AWAITING MEASUREMENT`.
 
-**It is blocked on Q2, Spike B and Spike C** — none of which is code, and all
-of which are recorded as open in §3 and in the plan's spike table. Do not start
-the adapter before Spike B: it is the only thing that can still break the §9.2
-decision, and if `moshi-server` cannot serve concurrent independent streams the
-adapter goes in-process instead.
+**Step 0 — record the fixture, if you have not.** Three minutes of French, the
+microphone you would really use, several clear sentence ends and a couple of
+mid-sentence pauses. **Write down verbatim what you said** in a `.txt` beside
+it: without a reference there is no WER, which is exactly why B1 could not
+produce one. Then put it in the canonical format:
 
-**This is the slice that can invalidate earlier work.** Every `[measure]` value
-in §8 has so far been tuned against a recognizer that emits a fixed script at a
-fixed delay (A-14). If French WER on real meeting audio turns out unusable,
-ADR-03 reopens — §10 calls that the largest technical risk left in the
-prototype.
+```bash
+ffmpeg -i your-recording.m4a -ac 1 -ar 24000 -sample_fmt s16 fr-slice4.wav
+cd backend
+uv run python -m tools.replay convert fr-slice4.wav tests/fixtures/audio/fr-slice4.pcm
+```
 
-### Traps
+**Step 1 — install, including the MLX extra.**
 
-Four mistakes this project has actually made, each more than once in spirit,
-are written up in `CLAUDE.md` under **Known traps**: stream time versus wall
-time, shared runtime state across participant tasks, unanchored globs in
-`.gitignore`, and holding a socket open while doing slow work.
+```bash
+cd backend
+uv venv && uv pip install -e ".[dev,mlx]"
+uv run alembic upgrade head
+```
 
-Read them before touching the realtime path. The regression test for the first
-is `test_ten_times_speed_produces_the_same_transcript_as_real_time`; for the
-second, `test_two_pumps_persisting_at_once_lose_nothing`. Keep both passing.
+**Step 2 — check the seam still holds before involving the model.** This is the
+run that proves `FakeRecognizer` was not disturbed, and it needs no GPU:
+
+```bash
+uv run pytest -q                      # 260, PostgreSQL required
+uv run ruff check . && uv run mypy    # clean, 88 files
+```
+
+**Step 3 — start the app-server on the real runtime.** It preloads the weights,
+so **it will sit on `asr_runtime_preloading` for a few minutes** the first time
+(B1 measured 284 s cold). That is the fix for a worse problem: paying it inside
+the first meeting instead would stall a live participant.
+
+```bash
+export MOSAIQUE_ASR_RUNTIME=mlx
+export MOSAIQUE_ASR_MODEL_REPO=kyutai/stt-1b-en_fr-mlx
+uv run uvicorn mosaique.app.main:create_app --factory --port 8000
+```
+
+**Step 4 — replay the fixture at real time, in another shell.**
+
+```bash
+cd backend
+uv run python -m tools.replay run tools/replay/scenarios/french-real.json \
+  --host-token "$(uv run python -m mosaique.app.seed | tail -1)" \
+  --speed 1.0 --report /tmp/slice4.json
+```
+
+**Step 5 — read the three things off it.**
+
+```bash
+# p95 first-word latency, and the transcript the model produced
+python3 -c "import json;r=json.load(open('/tmp/slice4.json'));print(r['totals']);print(*[s['text'] for s in r['segments']],sep=chr(10))"
+
+# the per-hop decomposition: the app-server logs one record per meeting
+#   grep it in the uvicorn output
+#   latency_decomposition stages_ms={...}
+
+# what produced the words — must read kyutai/stt-1b-en_fr@mlx-bf16
+psql mosaique -c "select asr_version, transcript_version from meetings order by created_at desc limit 1;"
+```
+
+**Step 6 — WER, by hand, once.** Compare the printed segments against your
+reference `.txt`. Word error rate is
+`(substitutions + insertions + deletions) / reference words`. Report it with the
+`asr_version` string beside it or the number means nothing later (ADR-13 §2).
+
+**Send back:** p95 first-word latency, the `latency_decomposition` line, WER,
+and the `asr_version`. Those four close the gate, and §8's
+`AWAITING MEASUREMENT` rows become measurements with your name and the date.
+
+**Still blocked, and not by this slice:** Slice 6 needs a CUDA host for Spike B2
+(A-3, A-4, and A-16's other half). `moshi_server` is implemented and has never
+touched a server.

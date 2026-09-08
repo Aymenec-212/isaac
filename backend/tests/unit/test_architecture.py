@@ -32,8 +32,18 @@ DOWNSTREAM_OF_INGRESS = [
 
 TRANSPORT_MODULES = {"fastapi", "starlette", "websockets", "uvicorn"}
 # ADR-13 consequence 4: a second runtime is exactly when this test stops being
-# theatre, so the MLX libraries are named here before the adapter exists.
-MODEL_MODULES = {"moshi", "torch", "transformers", "moshi_mlx", "mlx", "mlx_lm"}
+# theatre. `mlx_runtime.py` now really does import these, so the ban is load
+# bearing rather than hypothetical.
+MODEL_MODULES = {
+    "moshi",
+    "torch",
+    "transformers",
+    "moshi_mlx",
+    "mlx",
+    "mlx_lm",
+    "sentencepiece",
+    "huggingface_hub",
+}
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -85,6 +95,74 @@ def test_the_runtime_depends_on_the_ingress_protocol_not_the_websocket_class():
 
 def test_fake_and_kyutai_adapters_satisfy_the_same_protocol():
     from mosaique.speech.adapters.fake import FakeRecognizer
+    from mosaique.speech.adapters.kyutai import KyutaiRecognizer
     from mosaique.speech.interfaces import StreamingRecognizer
 
     assert isinstance(FakeRecognizer(), StreamingRecognizer)
+    assert isinstance(KyutaiRecognizer(lambda: None), StreamingRecognizer)  # type: ignore[arg-type]
+
+
+def test_the_kyutai_adapter_does_not_open_its_own_socket():
+    """Slice 4's version of the D-04 rule.
+
+    `moshi_server` talks over a WebSocket, which `speech/` may not import. The
+    socket lives in `asr_runtime/` and is injected through a Protocol. This is
+    the assertion that keeps that arrangement from quietly collapsing back into
+    a direct import the first time someone finds the indirection annoying.
+    """
+    offenders = {
+        str(path.relative_to(SRC)): sorted(imported_modules(path) & TRANSPORT_MODULES)
+        for path in python_files("speech/adapters/kyutai")
+        if imported_modules(path) & TRANSPORT_MODULES
+    }
+    assert not offenders, f"the ASR adapter opened its own transport: {offenders}"
+
+
+def test_the_asr_transport_carries_no_model_code():
+    """The mirror image: `asr_runtime/` may hold a socket, never a model."""
+    offenders = {
+        str(path.relative_to(SRC)): sorted(imported_modules(path) & MODEL_MODULES)
+        for path in python_files("asr_runtime")
+        if imported_modules(path) & MODEL_MODULES
+    }
+    assert not offenders, f"model libraries leaked into the transport: {offenders}"
+
+
+def test_mlx_dependencies_are_gated_on_apple_silicon():
+    """ADR-13 consequence 5, as a build failure rather than a code review note.
+
+    A plain `moshi_mlx` dependency breaks `uv pip install -e ".[dev]"` on Linux
+    and in any future CI, and it breaks it at install time — long before anyone
+    reaches a test that would explain why.
+    """
+    import tomllib
+
+    pyproject = tomllib.loads((SRC.parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    extras = pyproject["project"]["optional-dependencies"]
+
+    assert "mlx" in extras, "the MLX runtime must stay an optional extra"
+    ungated = [
+        requirement
+        for requirement in extras["mlx"]
+        if "sys_platform == 'darwin'" not in requirement
+        or "platform_machine == 'arm64'" not in requirement
+    ]
+    assert not ungated, f"MLX requirements without a platform marker: {ungated}"
+
+
+def test_the_default_install_pulls_in_no_model_library():
+    """`dev` is what the sandbox and CI install. It must stay model-free."""
+    import tomllib
+
+    pyproject = tomllib.loads((SRC.parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    installed = (
+        pyproject["project"]["dependencies"]
+        + (pyproject["project"]["optional-dependencies"]["dev"])
+    )
+
+    leaked = [
+        requirement
+        for requirement in installed
+        if any(requirement.lower().startswith(name) for name in MODEL_MODULES)
+    ]
+    assert not leaked, f"a model library reached the default install: {leaked}"

@@ -30,6 +30,26 @@ dev = [
     "websockets>=13.0",
 ]
 
+# ADR-13 consequence 5. MLX is macOS/arm64 only, so it is an extra behind an
+# environment marker: `uv pip install -e ".[dev]"` has to keep working in a
+# Linux sandbox and in CI, and a plain dependency would break both. The
+# `moshi_mlx` pin is the release whose loader `mlx_runtime.py` mirrors —
+# deviating would mean running something upstream does not ship.
+mlx = [
+    "moshi_mlx==0.2.12; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sentencepiece>=0.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "huggingface_hub>=0.26; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "numpy>=1.26; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sphn>=0.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+# The deployment runtime. No platform marker: any host can reach a remote
+# `moshi-server`. Unverified — no CUDA machine exists yet (Spike B2).
+moshi-server = [
+    "websockets>=13.0",
+    "msgpack>=1.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -69,6 +89,27 @@ plugins = []
 [[tool.mypy.overrides]]
 module = ["tests.*"]
 disallow_untyped_defs = false
+
+# The ASR runtimes' own libraries. None of them can be installed on the machine
+# this project is developed on — MLX is macOS/arm64 only (ADR-13 consequence 5)
+# and msgpack rides with the moshi-server extra — so mypy is told they are
+# absent on purpose rather than missing by accident. Every call into them is
+# already confined to `speech/adapters/kyutai/mlx_runtime.py` and
+# `asr_runtime/moshi_ws.py`, which is what `test_architecture.py` enforces, so
+# the blast radius of the untyped surface is two files.
+[[tool.mypy.overrides]]
+module = [
+    "mlx",
+    "mlx.*",
+    "moshi_mlx",
+    "moshi_mlx.*",
+    "sentencepiece",
+    "huggingface_hub",
+    "numpy",
+    "msgpack",
+    "sphn",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

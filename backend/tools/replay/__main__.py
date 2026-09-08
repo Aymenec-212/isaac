@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from tools.replay.fixtures import synthetic_pcm
+from tools.replay.fixtures import synthetic_pcm, wav_to_canonical_pcm
 from tools.replay.harness import ReplayHarness
 from tools.replay.scenario import Scenario
 
@@ -58,6 +58,14 @@ def _make_fixture(args: argparse.Namespace) -> int:
     return 0
 
 
+def _convert(args: argparse.Namespace) -> int:
+    pcm = wav_to_canonical_pcm(Path(args.wav))
+    Path(args.out).write_bytes(pcm)
+    seconds = len(pcm) / (24_000 * 2)
+    print(f"wrote {seconds:.2f} s of 24 kHz s16le mono to {args.out}", file=sys.stderr)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tools.replay", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -77,6 +85,11 @@ def main(argv: list[str] | None = None) -> int:
     fixture.add_argument("--ms", type=int, default=20_000)
     fixture.add_argument("--seed", type=int, default=1)
     fixture.set_defaults(func=_make_fixture)
+
+    convert = sub.add_parser("convert", help="24 kHz mono WAV -> the raw PCM a scenario points at")
+    convert.add_argument("wav")
+    convert.add_argument("out")
+    convert.set_defaults(func=_convert)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

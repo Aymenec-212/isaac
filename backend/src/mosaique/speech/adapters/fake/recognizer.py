@@ -22,9 +22,11 @@ from mosaique.speech.adapters.fake.script import (
     ScriptItem,
 )
 from mosaique.speech.interfaces import (
+    FAKE_IDENTITY,
     FRAME_DURATION_MS,
     ASREvent,
     ASRHealth,
+    AsrIdentity,
     ASRSessionConfig,
     AudioChunk,
     EndOfTurnEvent,
@@ -49,6 +51,12 @@ class FakeASRSession:
         self._closed = False
         self._last_event_at_ms: int | None = None
         self._events_emitted = 0
+
+    @property
+    def identity(self) -> AsrIdentity:
+        """`fake/scripted@fake-none`, so a scripted transcript is never
+        mistaken for one a model produced (ADR-13 consequence 3)."""
+        return FAKE_IDENTITY
 
     @property
     def stream_offset_ms(self) -> int:

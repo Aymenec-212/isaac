@@ -45,6 +45,14 @@ class IngressAudioFrame:
     audio_session_id: str
     seq: int
     pcm: bytes
+    capture_ms: int | None = None
+    """The client's own clock, carried for latency diagnostics only.
+
+    ADR-11 forbids trusting it for ordering and nothing here does. It exists so
+    the `capture -> gateway_recv` hop can be reported, and that hop is reported
+    separately from every other because it contains clock skew between two
+    machines rather than time actually spent.
+    """
 
 
 @dataclass(frozen=True)
