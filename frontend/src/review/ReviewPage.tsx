@@ -8,6 +8,7 @@ import {
   unplayableCitations,
   type EvidenceTarget,
 } from "./evidence";
+import { resultSummary, splitOnMatches } from "./highlight";
 
 /** Post-meeting review. Outputs are derived data; the transcript is authoritative. */
 export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: () => void }) {
@@ -15,6 +16,10 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
   const [outputs, setOutputs] = useState<OutputsResponse | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
+  // What is typed, and what the server has actually answered for. Kept apart so
+  // the transcript never renders under a heading describing a different query.
+  const [queryInput, setQueryInput] = useState("");
+  const [results, setResults] = useState<TranscriptResponse | null>(null);
 
   // One AudioContext for the page, one player per audio session. Created
   // lazily: browsers refuse to start a context before a user gesture, so
@@ -26,6 +31,32 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
   useEffect(() => {
     void api.transcript(meetingId).then(setTranscript);
   }, [meetingId]);
+
+  // Debounced, and every response checked against the query still in the box:
+  // without that, a slow answer for "bud" can land after a fast one for
+  // "budget" and quietly show the wrong results.
+  useEffect(() => {
+    const wanted = queryInput.trim();
+    if (!wanted) {
+      setResults(null);
+      return;
+    }
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      void api
+        .transcript(meetingId, wanted)
+        .then((next) => {
+          if (!cancelled && next.query === wanted) setResults(next);
+        })
+        .catch(() => {
+          if (!cancelled) setResults(null);
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [meetingId, queryInput]);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +136,23 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
   const decisions = outputs?.decisions ?? [];
   const actions = outputs?.action_items ?? [];
   const unplayable = useMemo(() => unplayableCitations(outputs, index), [outputs, index]);
+
+  // While a search is active the transcript shows the server's filtered list;
+  // otherwise the whole thing. Citations always resolve against the *full*
+  // transcript, so clicking a decision still works mid-search.
+  const searching = results !== null;
+  const shownSegments = searching ? results.segments : (transcript?.segments ?? []);
+  const summary = searching
+    ? resultSummary(results.segments.length, results.total_segments ?? 0, results.query ?? "")
+    : "";
+  const spansBySegment = useMemo(() => {
+    const map = new Map<string, [number, number][]>();
+    for (const match of results?.matches ?? []) {
+      map.set(match.segment_id, match.spans as [number, number][]);
+    }
+    return map;
+  }, [results]);
+  const spansFor = (segmentId: string) => spansBySegment.get(segmentId);
 
   const evidence = (ids: string[]) => {
     const targets = resolveAll(ids, index);
@@ -202,8 +250,20 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
       )}
 
       <h3 className="transcript-heading">Transcript</h3>
+
+      <div className="transcript-search">
+        <input
+          type="search"
+          value={queryInput}
+          onChange={(event) => setQueryInput(event.target.value)}
+          placeholder="Rechercher dans le transcript…"
+          aria-label="Rechercher dans le transcript"
+        />
+        {summary && <span className="muted">{summary}</span>}
+      </div>
+
       <div className="transcript">
-        {transcript?.segments.map((segment) => (
+        {shownSegments.map((segment) => (
           <p
             key={segment.id}
             ref={(node) => {
@@ -213,7 +273,13 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
             className={`line line-final${active === segment.id ? " line-cited" : ""}`}
           >
             <span className="speaker">{index.speakerFor(segment.participant_id)}</span>
-            {segment.text}
+            {splitOnMatches(segment.text, spansFor(segment.id)).map((part, i) =>
+              part.match ? (
+                <mark key={i}>{part.text}</mark>
+              ) : (
+                <span key={i}>{part.text}</span>
+              ),
+            )}
           </p>
         ))}
       </div>

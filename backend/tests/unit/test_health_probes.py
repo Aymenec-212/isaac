@@ -48,7 +48,7 @@ def test_a_gating_dependency_that_is_down_blocks_readiness():
 
 
 def test_an_unknown_gating_dependency_blocks_readiness():
-    """"I have not checked" is not "it is fine".
+    """ "I have not checked" is not "it is fine".
 
     This is the case that keeps `moshi_server` honest: it reports `unknown`
     because nobody has ever reached one, and readiness must not paper over that

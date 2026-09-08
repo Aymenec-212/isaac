@@ -29,6 +29,7 @@ from mosaique.app.api.schemas import (
     MeetingView,
     OutputsResponse,
     ParticipantView,
+    SegmentMatchView,
     SegmentView,
     TranscriptResponse,
 )
@@ -56,6 +57,7 @@ from mosaique.persistence.repositories.transcript import (
 )
 from mosaique.realtime.protocol.messages import MeetingStateMessage
 from mosaique.realtime.runtime_state import get_registry
+from mosaique.transcript.search import search
 
 # Documented on every route so the error envelope is part of the published
 # contract and lands in the generated frontend client (tech spec 6).
@@ -215,9 +217,20 @@ async def end_meeting(
 
 @router.get("/{meeting_id}/transcript", response_model=TranscriptResponse)
 async def get_transcript(
-    meeting_id: str, principal: PrincipalDep, session: SessionDep
+    meeting_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    q: str | None = None,
 ) -> TranscriptResponse:
-    """Final segments in display order. Interim text is never stored (ADR-05)."""
+    """Final segments in display order. Interim text is never stored (ADR-05).
+
+    `?q=` filters to segments containing the text (FR-10, tech spec §6). The
+    match is accent-insensitive — see `transcript/search.py` for why that is
+    worth a deviation from the spec's "ILIKE for now" in a French-first product.
+
+    Filtering happens after the fetch, which costs nothing extra: rendering the
+    transcript already loads every segment.
+    """
     if not is_valid_id(meeting_id):
         raise NotFound()
     repo = MeetingRepository(session, principal.organization_id)
@@ -231,12 +244,18 @@ async def get_transcript(
     audio_sessions = await AudioSessionRepository(
         session, principal.organization_id
     ).list_for_meeting(meeting_id)
+    visible, matches = search(segments, q or "")
     return TranscriptResponse(
         meeting_id=meeting.id,
         transcript_version=meeting.transcript_version,
         participants=[ParticipantView.model_validate(p) for p in participants],
-        segments=[SegmentView.model_validate(s) for s in segments],
+        segments=[SegmentView.model_validate(s) for s in visible],
         audio_sessions=[AudioSessionView.model_validate(a) for a in audio_sessions],
+        query=q,
+        total_segments=len(segments),
+        matches=[
+            SegmentMatchView(segment_id=m.segment_id, spans=list(m.spans)) for m in matches.values()
+        ],
     )
 
 

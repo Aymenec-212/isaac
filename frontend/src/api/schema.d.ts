@@ -169,6 +169,13 @@ export interface paths {
         /**
          * Get Transcript
          * @description Final segments in display order. Interim text is never stored (ADR-05).
+         *
+         *     `?q=` filters to segments containing the text (FR-10, tech spec §6). The
+         *     match is accent-insensitive — see `transcript/search.py` for why that is
+         *     worth a deviation from the spec's "ILIKE for now" in a French-first product.
+         *
+         *     Filtering happens after the fetch, which costs nothing extra: rendering the
+         *     transcript already loads every segment.
          */
         get: operations["get_transcript_meetings__meeting_id__transcript_get"];
         put?: never;
@@ -444,6 +451,23 @@ export interface components {
             /** Dependencies */
             dependencies: components["schemas"]["DependencyView"][];
         };
+        /**
+         * SegmentMatchView
+         * @description Where a search query matched inside one segment (FR-10).
+         *
+         *     Offsets come from the server rather than being recomputed in the browser,
+         *     so a highlight cannot disagree with what was actually matched — the two
+         *     would otherwise need identical accent-folding in two languages.
+         */
+        SegmentMatchView: {
+            /** Segment Id */
+            segment_id: string;
+            /** Spans */
+            spans: [
+                number,
+                number
+            ][];
+        };
         /** SegmentView */
         SegmentView: {
             /** Id */
@@ -478,6 +502,18 @@ export interface components {
              * @default []
              */
             audio_sessions: components["schemas"]["AudioSessionView"][];
+            /** Query */
+            query?: string | null;
+            /**
+             * Total Segments
+             * @default 0
+             */
+            total_segments: number;
+            /**
+             * Matches
+             * @default []
+             */
+            matches: components["schemas"]["SegmentMatchView"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -910,7 +946,9 @@ export interface operations {
     };
     get_transcript_meetings__meeting_id__transcript_get: {
         parameters: {
-            query?: never;
+            query?: {
+                q?: string | null;
+            };
             header?: {
                 authorization?: string | null;
             };

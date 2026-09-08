@@ -561,3 +561,33 @@ input[type="text"] {
     background: rgba(240, 194, 107, 0.1);
   }
 }
+
+/* --- Slice 6A: transcript search (FR-10) -------------------------------- */
+
+.transcript-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 10px;
+  flex-wrap: wrap;
+}
+
+.transcript-search input[type="search"] {
+  flex: 1 1 260px;
+  max-width: 420px;
+  padding: 7px 11px;
+  font: inherit;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: transparent;
+  color: inherit;
+}
+
+/* `mark` defaults to black-on-yellow, which is unreadable in dark mode and
+   ignores the page's own palette. */
+.transcript mark {
+  background: rgba(120, 160, 255, 0.32);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
