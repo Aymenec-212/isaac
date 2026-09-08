@@ -54,7 +54,7 @@ test.
 counts with silence padding, never from client clocks. Silence detection is
 judged in stream time, never wall time — audio arrives faster than real time in
 every replay, and comparing the two fabricates segment breaks. This bug has
-already been found once; do not reintroduce it.
+already been found twice — see Known traps; do not reintroduce it.
 
 **Only final segments are persisted.** Interim text lives in memory and is
 disposable. Process memory is never the authoritative record.
@@ -72,8 +72,9 @@ uv venv && uv pip install -e ".[dev]"
 uv run alembic upgrade head
 uv run python -m mosaique.app.seed            # prints a host token
 uv run uvicorn mosaique.app.main:create_app --factory --reload --port 8000
-uv run pytest -q                              # 117
-uv run pytest -q -m "not integration"         # 85, no database needed
+uv run pytest -q                              # 152, 1 deselected
+uv run pytest -q -m "not integration"         # 104, no database needed
+uv run pytest -q -m slow                      # the accelerated hour, ~70 s
 uv run ruff check . && uv run ruff format .
 uv run mypy                                   # strict
 uv run python tools/export_openapi.py ../frontend/openapi.json
