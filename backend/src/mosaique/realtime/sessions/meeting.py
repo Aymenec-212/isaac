@@ -326,7 +326,7 @@ class MeetingRuntime:
                 # all, so on that runtime punctuation is the only boundary
                 # marker there is. Where a runtime does emit one, both rules
                 # are live and whichever fires first wins.
-                close_on_sentence_end=not getattr(asr, "emits_end_of_turn", False),
+                close_on_sentence_end=not asr.emits_end_of_turn,
             ),
             epoch_ms=epoch_ms,
         )

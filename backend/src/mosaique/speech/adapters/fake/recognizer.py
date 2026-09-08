@@ -53,6 +53,16 @@ class FakeASRSession:
         self._events_emitted = 0
 
     @property
+    def emits_end_of_turn(self) -> bool:
+        """True: the script carries `ScriptedEndOfTurn` items and emits them.
+
+        Saying so keeps the fake's segmentation exactly as Slices 1-3 left it.
+        The punctuation fallback exists for a runtime with no VAD, and turning
+        it on here would silently move where the scripted phrases close.
+        """
+        return True
+
+    @property
     def identity(self) -> AsrIdentity:
         """`fake/scripted@fake-none`, so a scripted transcript is never
         mistaken for one a model produced (ADR-13 consequence 3)."""

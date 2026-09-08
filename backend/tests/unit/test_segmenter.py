@@ -190,3 +190,19 @@ def test_an_end_of_turn_still_closes_a_segment_when_the_runtime_sends_one():
     events = seg.on_end_of_turn(EndOfTurnEvent(at_ms=500, probability=0.9))
 
     assert events[0].reason == "end_of_turn"
+
+
+def test_a_runtime_with_a_vad_keeps_the_slice_1_to_3_closing_behaviour():
+    """The fake emits end-of-turn, so it gets no punctuation fallback.
+
+    This is the assertion that catches the wiring slip where a missing
+    capability defaulted to "no VAD" and silently moved every scripted phrase's
+    closing point.
+    """
+    from mosaique.speech.adapters.fake import FakeASRSession
+
+    seg = Segmenter(close_on_sentence_end=not FakeASRSession().emits_end_of_turn)
+    seg.on_word(word("commencer.", 0))
+
+    assert seg.has_open_segment
+    assert seg.on_end_of_turn(EndOfTurnEvent(at_ms=300, probability=0.9))[0].reason == "end_of_turn"

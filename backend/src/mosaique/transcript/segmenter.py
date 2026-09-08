@@ -95,8 +95,12 @@ squarely inside a phrase.
 This is a rule the specification did not have, added because §9.3's primary
 mechanism is absent on the development runtime: with no VAD heads, the MLX
 segmenter would otherwise have only a silence timer that the paragraph above
-shows cannot do the job alone. On `moshi_server` both signals exist and
-whichever fires first wins.
+shows cannot do the job alone.
+
+The runtime enables it exactly where that is true — `ASRSession.emits_end_of_turn`
+is False — and leaves it off where a semantic VAD exists. Running both at once
+is untested: B1 measured punctuation against MLX output, and how it interacts
+with `moshi_server`'s VAD is Spike B2's to find out, not this slice's to assume.
 
 Configurable rather than hard-coded because of a risk one fixture cannot rule
 out: a French abbreviation — `M.`, `Mme.`, `etc.` — ends in a period without

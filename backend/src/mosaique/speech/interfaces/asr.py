@@ -109,6 +109,20 @@ class ASRSession(Protocol):
         """
         ...
 
+    @property
+    def emits_end_of_turn(self) -> bool:
+        """Whether this recognizer ever produces `EndOfTurnEvent`.
+
+        Declared here rather than discovered with `getattr`, because the
+        default a missing attribute would take is a segmentation decision: a
+        recognizer wrongly reported as silent gets the punctuation fallback
+        rule it does not need, and its segments close in different places.
+
+        False on Kyutai's `-mlx` weights, which carry no VAD heads at all
+        (Spike B1 §4) — the measurement that put this on the interface.
+        """
+        ...
+
     async def push_audio(self, chunk: AudioChunk) -> None: ...
 
     def events(self) -> AsyncIterator[ASREvent]: ...

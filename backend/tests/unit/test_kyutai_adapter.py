@@ -468,3 +468,18 @@ async def test_a_stream_that_cannot_reconnect_says_so_instead_of_going_quiet():
     assert [e.code for e in seen] == ["ASR_UNAVAILABLE"]
     assert seen[0].fatal
     await backend.close()
+
+
+# --------------------------------------------------------------------------
+# The capability the segmenter branches on
+# --------------------------------------------------------------------------
+
+
+def test_every_recognizer_declares_whether_it_emits_an_end_of_turn():
+    """It is on the Protocol, not discovered with `getattr`, because the
+    default a missing attribute would take is a segmentation decision."""
+    from mosaique.speech.adapters.fake import FakeASRSession
+
+    assert FakeASRSession().emits_end_of_turn is True
+    assert KyutaiSession(StubBackend(emits_end_of_turn=False)).emits_end_of_turn is False
+    assert KyutaiSession(StubBackend(emits_end_of_turn=True)).emits_end_of_turn is True
