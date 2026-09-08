@@ -97,8 +97,8 @@ uv venv && uv pip install -e ".[dev]"
 uv run alembic upgrade head
 uv run python -m mosaique.app.seed            # prints a host token
 uv run uvicorn mosaique.app.main:create_app --factory --reload --port 8000
-uv run pytest -q                              # 365, 1 deselected
-uv run pytest -q -m "not integration"         # 294, no database needed
+uv run pytest -q                              # 380, 1 deselected
+uv run pytest -q -m "not integration"         # 305, no database needed
 uv run pytest -q -m slow                      # the accelerated hour, ~70 s
 uv run ruff check . && uv run ruff format .
 uv run mypy                                   # strict
