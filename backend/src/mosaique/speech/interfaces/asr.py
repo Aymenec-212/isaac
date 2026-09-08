@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from mosaique.speech.interfaces.identity import AsrIdentity
 
@@ -143,6 +143,42 @@ class ASRSession(Protocol):
     def health(self) -> ASRHealth: ...
 
 
+ReadinessState = Literal["ready", "not_ready", "unknown"]
+
+
+@dataclass(frozen=True)
+class RecognizerReadiness:
+    """Can this runtime take a meeting right now? (tech spec 15, `/readyz`.)
+
+    Three states rather than a boolean, because "I have not checked" is a real
+    answer and pretending otherwise is how a health endpoint starts lying.
+    `unknown` is what a runtime returns when it cannot answer without doing
+    something expensive — reaching a remote server, say — and `/readyz` treats
+    it as not-ready. That is deliberate: it makes an unimplemented probe visible
+    instead of silently green.
+
+    Runtime-level, and distinct from `ASRHealth`, which describes one live
+    stream. This one answers a question asked before any stream exists.
+    """
+
+    state: ReadinessState
+    detail: str
+
+    @property
+    def ready(self) -> bool:
+        return self.state == "ready"
+
+
 @runtime_checkable
 class StreamingRecognizer(Protocol):
     async def open_session(self, cfg: ASRSessionConfig) -> ASRSession: ...
+
+    async def readiness(self) -> RecognizerReadiness:
+        """Whether a meeting started now would reach a working model.
+
+        On the Protocol with no default, for the reason `emits_end_of_turn` is
+        (L-25): a capability discovered with `getattr(..., default)` gets the
+        default silently, and here the tempting default — "ready" — is the one
+        that turns a broken runtime into a green health check.
+        """
+        ...

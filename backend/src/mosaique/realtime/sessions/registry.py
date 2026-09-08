@@ -33,6 +33,18 @@ class MeetingRegistry:
         self._lock = asyncio.Lock()
 
     @property
+    def recognizer(self) -> StreamingRecognizer:
+        """The configured recognizer, for the `/readyz` probe.
+
+        Exposed so health can ask the runtime whether it is ready *through the
+        seam* rather than inferring it from configuration. Reading
+        `settings.asr_runtime` would report what was requested, not what is
+        actually loaded — and would hand the app-server knowledge of which
+        adapter it holds, which is precisely what D-04 forbids.
+        """
+        return self._recognizer
+
+    @property
     def audio_store(self) -> AudioStore:
         """Read access for the FR-11 audio route.
 

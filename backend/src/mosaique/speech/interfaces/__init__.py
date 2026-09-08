@@ -14,6 +14,8 @@ from mosaique.speech.interfaces.asr import (
     ASRSessionConfig,
     AudioChunk,
     EndOfTurnEvent,
+    ReadinessState,
+    RecognizerReadiness,
     StreamingRecognizer,
     WordEvent,
 )
@@ -40,6 +42,8 @@ __all__ = [
     "AsrIdentity",
     "AudioChunk",
     "EndOfTurnEvent",
+    "ReadinessState",
+    "RecognizerReadiness",
     "StreamingRecognizer",
     "WordEvent",
 ]

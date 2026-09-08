@@ -30,6 +30,7 @@ from mosaique.speech.interfaces import (
     ASRSessionConfig,
     AudioChunk,
     EndOfTurnEvent,
+    RecognizerReadiness,
     WordEvent,
 )
 
@@ -151,6 +152,15 @@ class FakeRecognizer:
         self._script = script
         self._delay_ms = delay_ms
         self.opened_sessions: list[FakeASRSession] = []
+
+    async def readiness(self) -> RecognizerReadiness:
+        """Always ready: there is nothing to load and nothing to reach.
+
+        Honest rather than lazy — the fake really can take a meeting at any
+        moment, which is what makes it useful for every test that is not about
+        the model.
+        """
+        return RecognizerReadiness(state="ready", detail="fake recognizer; no model and no network")
 
     async def open_session(self, cfg: ASRSessionConfig) -> FakeASRSession:
         session = FakeASRSession(self._script, delay_ms=self._delay_ms)

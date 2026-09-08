@@ -501,3 +501,63 @@ input[type="text"] {
   opacity: 0.7;
   font-size: 0.9em;
 }
+
+/* --- Slice 6A: dependency health banner (tech spec 15) ------------------ */
+
+.health-banner {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border-left: 4px solid currentColor;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+}
+
+.health-message {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 320px;
+}
+
+/* Blocked and unreachable read the same to a person: you cannot hold a
+   meeting right now. Only the detail below distinguishes them. */
+.health-blocked,
+.health-unreachable {
+  color: #b3261e;
+  background: rgba(179, 38, 30, 0.08);
+}
+
+.health-warning {
+  color: #8a5a00;
+  background: rgba(138, 90, 0, 0.09);
+}
+
+.health-toggle {
+  font-size: 12px;
+  padding: 4px 9px;
+}
+
+.health-detail {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+@media (prefers-color-scheme: dark) {
+  .health-blocked,
+  .health-unreachable {
+    color: #f2b8b5;
+    background: rgba(242, 184, 181, 0.1);
+  }
+
+  .health-warning {
+    color: #f0c26b;
+    background: rgba(240, 194, 107, 0.1);
+  }
+}

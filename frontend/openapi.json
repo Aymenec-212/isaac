@@ -28,6 +28,50 @@
         }
       }
     },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readyz",
+        "description": "Could this instance take a meeting right now? (tech spec 15.)\n\n503 when not, with the reason in the body \u2014 a load balancer needs the\nstatus code, and the person reading the logs afterwards needs the sentence.",
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/deps": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health Deps",
+        "description": "Per-dependency detail. Always 200 \u2014 this endpoint reports, it does not judge.\n\nSeparate from `/readyz` because they are read by different things: a load\nbalancer wants a status code, and a person wants to know which of three\ndependencies is the one that is broken.",
+        "operationId": "health_deps_health_deps_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/meetings": {
       "post": {
         "tags": [
@@ -928,6 +972,35 @@
         ],
         "title": "CreateMeetingResponse"
       },
+      "DependencyView": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "gates_readiness": {
+            "type": "boolean",
+            "title": "Gates Readiness"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "state",
+          "detail",
+          "gates_readiness"
+        ],
+        "title": "DependencyView",
+        "description": "One dependency's state (tech spec 15, `/health/deps`)."
+      },
       "EndMeetingResponse": {
         "properties": {
           "meeting": {
@@ -1337,6 +1410,37 @@
           "role"
         ],
         "title": "ParticipantView"
+      },
+      "ReadinessResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "dependencies": {
+            "items": {
+              "$ref": "#/components/schemas/DependencyView"
+            },
+            "type": "array",
+            "title": "Dependencies"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "summary",
+          "dependencies"
+        ],
+        "title": "ReadinessResponse"
       },
       "SegmentView": {
         "properties": {
