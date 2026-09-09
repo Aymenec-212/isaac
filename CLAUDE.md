@@ -144,8 +144,9 @@ to start work without asking anyone a question.*
 
 ### Where the project is
 
-**Slices 0–5 are VERIFIED and merged. Slice 6A (Phase A) is in progress —
-five of its six items are done.**
+**Slices 0–5 are VERIFIED and merged. Slice 6A (Phase A) is five of six done.
+The current slice is 6R — single-user review hardening — specified 2026-09-09 and
+not yet built.**
 
 **474 tests**: 305 backend unit, 77 backend integration and realtime against real
 PostgreSQL, 79 frontend unit, 8 Playwright browser specs. Plus a 60-minute
@@ -167,6 +168,8 @@ Re-sequenced 2026-09-08. Read `docs/IMPLEMENTATION_PLAN.md` v1.3 before picking
 up work.
 
 - **Phase A — now.** Slice 6A: harden the single-user product on M1 + MLX.
+  **Slice 6R: make the transcript readable** — added 2026-09-09, sequenced ahead
+  of 6A's last item.
 - **Phase B.** Slice 6B: `moshi-server` on a dedicated NVIDIA host, and measure
   the production serving path. Blocked on hardware, not on code.
 - **Phase C.** Slice 6C: four participants, original Slice 6 exit gate intact.
@@ -176,10 +179,19 @@ original item and exit-gate clause into exactly one of 6A/6B/6C.
 
 ### What to do next
 
-**Doable now, no hardware** — one live item is left:
+**Slice 6R first — read `docs/IMPLEMENTATION_PLAN.md` v1.4 before starting it.**
+The transcript is presented as one paragraph per segment with the speaker
+repeated on each; an hour of French is ~930 labelled lines. The principle is
+Aymen's: *preserve the raw segment/word evidence internally, present a
+human-readable transcript by default.* Two of its eight items — clickable
+citations and search highlighting — **already work and are regression
+constraints**, because paragraph grouping is exactly what breaks them.
+
+**Then, and only then:**
 
 1. **The remaining §15 metrics**, with a stated reason each. The spec lists them;
-   `/livez`, `/readyz`, `/health/deps` already exist.
+   `/livez`, `/readyz`, `/health/deps` already exist. Deliberately sequenced
+   *after* 6R.
 2. ~~**Degraded-state UX.**~~ **Done 2026-09-09** — `frontend/e2e/degraded.spec.ts`
    (6 specs). It found a real bug on the way (L-35), which is what the item was
    for. The **join** path still has the same shape and is deliberately not
@@ -201,6 +213,7 @@ report it already writes; only the last needs duration.
 |---|---|
 | **L-28** — the orphaned sentence-final word, 8 of 30 | **Deferred by Aymen.** Do not reopen unprompted. `tests/unit/test_l28_orphaned_final_word.py` pins its shape; it asserts behaviour that is *wrong*, on purpose. Do not encode its suspected cause anywhere — that is still a hypothesis. |
 | **Q2 — LLM provider** | OpenAI `gpt-4o-mini`, chosen on available credit. **The EU-residency half is still open** and is a product/legal call, not an engineering one. |
+| **Q9 — transcript corrections** | **In scope as of 2026-09-09** (Aymen), reversing the standing "out of scope" default. **Additive only:** raw ASR text and word timings are never overwritten, or L-28, the WER and every `[measure]` row become unfalsifiable. Slice 6R item 7. |
 | **L-33 — search is not ILIKE** | Deliberate. §6 says "ILIKE for now"; `ILIKE` is accent-sensitive and this is a French-first product. Matching is accent-insensitive, in Python, meeting-scoped. |
 | **Phases A/B/C** | The sequencing above. Four participants are postponed, not dropped. |
 

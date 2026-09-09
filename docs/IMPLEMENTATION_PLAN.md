@@ -1,7 +1,7 @@
 # Mosaïque — Implementation Plan
 
-**Version:** 1.3 (re-sequenced into Phases A/B/C — 2026-09-08)
-**Date:** 2026-09-03, re-sequenced 2026-09-08
+**Version:** 1.4 (Slice 6R added to Phase A — 2026-09-09)
+**Date:** 2026-09-03, re-sequenced 2026-09-08, extended 2026-09-09
 
 **Normative source:** Technical Specification v0.1 §18. This plan re-cuts that sequence into vertical slices; it does not change its scope. Future-architecture work (external platform ingress, LiveKit) is **not in this plan** — see `mosaique-future-media-plane-options.md`.
 **Method:** thin vertical slices. Every slice cuts through browser → gateway → runtime → ASR → database → UI and ends in something a person can watch happen.
@@ -20,13 +20,14 @@ remaining work splits into three phases.
 
 | Phase | Runtime | Objective | Status |
 |---|---|---|---|
-| **A — Local single-user product** | M1 + MLX Kyutai | One person can reliably conduct a complete meeting locally and trust the transcript and the meeting intelligence. Repeatably, not once. | **CURRENT FOCUS** |
+| **A — Local single-user product** | M1 + MLX Kyutai | One person can reliably conduct a complete meeting locally and trust the transcript and the meeting intelligence. Repeatably, not once — and **read it**, which is Slice 6R. | **CURRENT FOCUS** — 6A five of six items done, 6R next |
 | **B — GPU / production ASR validation** | dedicated NVIDIA + `moshi-server` | Prove the production serving path and measure it: GPU memory, real-time factor, p50/p95 latency, sustained stability, concurrent capacity, 1/2/4-participant behaviour. | Blocked on hardware |
 | **C — Four participants** | the Phase B runtime | Demonstrate the original four-participant requirement and the rest of Slice 6's concurrency and load criteria. | Blocked on Phase B |
 
 **Why this order.** Phase A's work — search, health endpoints, degraded-state UX,
-lifecycle tests, long single-user runs — is product work that needs no GPU and
-was being held behind an infrastructure purchase. Phase B's measurements cannot
+lifecycle tests, long single-user runs, and now the review experience (6R) — is
+product work that needs no GPU and was being held behind an infrastructure
+purchase. Phase B's measurements cannot
 be simulated and must not be guessed. Doing A first means the thing being
 deployed onto a GPU in Phase B is already known to work.
 
@@ -225,6 +226,128 @@ single-stream `[measure]` row has a real number.
 
 ---
 
+## Slice 6R — Single-user review hardening (PHASE A — next)
+
+**Added 2026-09-09, at Aymen's direction, after PR #14.** Sequenced *before*
+Slice 6B and 6C: "before moving on to the two users and serving the ASR model on
+a CUDA runtime, we first need to prioritize the single user experience and
+improve it." It is numbered **6R**, not 6D, because it belongs beside 6A in
+Phase A — a number after 6C would imply it comes after four participants, which
+is the opposite of the decision.
+
+**It also re-sequences one item inside 6A.** The remaining §15 metrics are 6A's
+last open item and are now deliberately *behind* this slice — item 8 of the
+priority list Aymen gave, after the seven review items. 6A does not close until
+they are done; it is waiting on 6R, not abandoned.
+
+### The design principle
+
+> Preserve the raw segment/word evidence internally, but present a human-readable
+> transcript by default. That supports auditability without forcing every user to
+> read the transcript like a stream of model events. — Aymen, 2026-09-09
+
+This is a **presentation** rule, not a storage one. Nothing in ADR-05 changes:
+only final segments are persisted, word timings are still stored, and the raw
+ASR output remains the record. What changes is that the record stops being the
+thing a person is shown by default.
+
+The concrete failure it names: today `ReviewPage` renders one `<p>` per segment
+with the speaker's name repeated on **every** one. Segments close on 1 200 ms of
+silence (§9.3), so an hour of French is roughly **930 paragraphs**, each labelled
+"Amina" — and 8 in 30 of them are a single orphaned word (L-28). That is a log,
+not a transcript.
+
+### Two modes, and why both stay
+
+| Mode | Renders | Exists for |
+|---|---|---|
+| **Live view** (`LiveMeeting`) | word-by-word, interim text visibly provisional, updating as the model revises | Making latency and transcription activity **visible**. It is the debugging and auditing surface and it is *not* to be "cleaned up" — seeing the model work is the point. |
+| **Review view** (`ReviewPage`) | finalized segments as readable sentences and paragraphs, grouped by speaker and by pause | Reading a meeting afterwards. Word-by-word rendering is tiring for normal review. |
+
+### The eight items, with what already exists
+
+Honest status first: **two of the eight are already built and working.** They are
+in the list because grouping segments into paragraphs is exactly what would break
+them, so here they are regression constraints rather than new work.
+
+| # | Item | Status today | This slice |
+|---|---|---|---|
+| 1 | Readable finalized transcript | ❌ one `<p>` per segment, speaker repeated on each | **Build.** Group into paragraphs. |
+| 2 | Interim vs final clearly distinct | ⚠ styled in the live view (italic, grey, border colour) — **colour and italics only**, no text label, and no browser test asserts a person can tell | **Harden.** Non-colour-dependent signal, asserted in a browser. |
+| 3 | Speaker grouping and timestamps | ❌ grouping absent; timestamps exist only on evidence links | **Build.** |
+| 4 | Clickable citations that seek audio | ✅ works — FR-11, `evidence.ts` (11), `playback.test.ts` (11), `test_audio_playback.py` (7), and the lifecycle test's citation→byte-range leg | **Must not regress.** Scroll targets are keyed to per-segment `<p>` nodes; grouping moves them. |
+| 5 | Search highlights the matching phrase | ✅ works — FR-10, server-returned offsets, `highlight.test.ts` (12) | **Must not regress.** Spans index into a *segment's* text; a paragraph is several segments joined. |
+| 6 | Graceful failed/degraded summaries | ⚠ `status: "failed"` renders one notice; a *partial* or low-confidence output has no state at all | **Harden.** |
+| 7 | Manual correction or annotation | ❌ absent, and **Q9's standing default is "out of scope"** | **Build — and it changes Q9.** See below. |
+| 8 | The remaining §15 metrics | ❌ 6A's last open item | **Not in this slice.** Explicitly after it. |
+
+### Item 7 changes an open question, and the shape matters
+
+Q9 — "are transcript corrections in scope?" — has carried the default **out of
+scope** since 2026-09-03. Aymen's priority list includes manual correction, which
+answers it. Recorded in `PROJECT_STATE.md` §3 as a decision with a date, not
+absorbed silently.
+
+**Corrections must be additive.** The raw ASR text is never overwritten:
+
+* the original segment text and its word timings stay exactly as the model
+  produced them — that is the auditability half of the design principle, and it
+  is also what keeps `asr_version` meaningful and any future WER re-measurement
+  possible;
+* a correction is stored *alongside*, with its own authorship and timestamp;
+* the review view shows the corrected text by default and can always reveal what
+  the model actually said.
+
+Destructive editing would make L-28, WER and every `[measure]` row unfalsifiable
+after the fact, which is too high a price for a nicer paragraph.
+
+**Open, and to be decided inside the slice rather than assumed:** whether
+correcting a segment invalidates the meeting intelligence that cites it.
+Outputs cite `evidence_segment_ids`, so a citation stays *resolvable* — the id is
+unchanged — but the quoted sentence may no longer match what the summary claims.
+Re-running the summary is a paid LLM call and a product decision; this slice does
+**not** do it automatically.
+
+**A person can:** open a finished meeting and read it the way they would read
+minutes — paragraphs, speakers, timestamps — click a decision and hear the
+moment, search and see the phrase highlighted, fix a word the model got wrong,
+and still get to the raw model output when they want to audit it.
+
+**Inside:** items 1, 2, 3, 6 and 7 above; items 4 and 5 held as regressions with
+browser tests that fail if grouping breaks them.
+
+**Outside, deliberately:**
+
+* the remaining §15 metrics (item 8) — after this slice, still 6A's to close;
+* anything needing a second concurrent stream (6C) or a GPU (6B);
+* **re-running meeting intelligence over corrected text** — named above, decided
+  in-slice, built later if at all;
+* **gating the join path on readiness** — the L-35 sibling. Same bug shape, but
+  refusing a participant who already holds an invite is its own product call and
+  is still open;
+* cross-meeting search (L-33) and L-28, both deferred by standing decision.
+
+**Exit gate:**
+
+1. An hour-long transcript renders as speaker-grouped paragraphs with
+   timestamps, not one labelled line per segment — asserted by a test over a
+   realistic segment count, not a three-segment fixture.
+2. Interim and final text are distinguishable **without relying on colour**, and
+   a browser spec asserts what a person sees.
+3. Clicking a citation still scrolls to the right moment and still seeks the
+   audio, with grouping in place — browser spec.
+4. A search still highlights the matching phrase inside a grouped paragraph, at
+   the right offsets — unit test over the join, plus a browser spec.
+5. A failed summary and a degraded one each render a distinct, accurate state,
+   and the transcript survives both.
+6. A correction round-trips: raw text preserved and retrievable, corrected text
+   shown by default, evidence still resolves, and a named test proves the
+   original is still there afterwards.
+7. `PROJECT_STATE.md` updated — Q9 answered, FR rows re-evidenced, new
+   limitations recorded, changelog row appended.
+
+---
+
 ## Slice 6B — GPU and production ASR validation (PHASE B)
 
 **Blocked on:** a dedicated NVIDIA host. This is a procurement item, not an
@@ -281,7 +404,7 @@ ledger has a real number.
 
 ```text
         ┌──────────────── PHASE A: laptop ────────────────┐  ┌── PHASE B ──┐ ┌ PHASE C ┐
-Slice 0 ─► 1 ─► 2 ─► 3 ─► 4 ─► 5 ─► 6A ──────────────────────► 6B ─────────► 6C ─► Slice 7
+Slice 0 ─► 1 ─► 2 ─► 3 ─► 4 ─► 5 ─► 6A ─► 6R ─► 6A(§15 metrics) ─► 6B ─────► 6C ─► Slice 7
                           ▲     ▲                                 ▲
 Spike B ─► Spike C ───────┘     │                                 │
 Spike D ────────────────────────┘                    a dedicated NVIDIA host
@@ -294,6 +417,13 @@ Slices 0–3 have no external dependency: no GPU, no vendor, no answer to Q2. If
 and including 6A runs on a laptop. The GPU is needed for exactly one thing —
 concurrency — and it now gates only the slice that actually needs it, instead of
 gating the product work queued behind it.
+
+**2026-09-09 extends it once more, and the diagram above is deliberately odd.**
+6A interleaves with 6R: five of 6A's six items are done, and its last one — the
+§15 metrics — is sequenced *after* 6R at Aymen's direction, because a readable
+transcript is worth more to a single user than a counter is. So 6A closes after
+6R rather than before it. Written this way rather than tidied, because pretending
+the slices are strictly ordered would misrepresent what is actually being built.
 
 ---
 
