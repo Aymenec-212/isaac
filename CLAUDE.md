@@ -97,7 +97,7 @@ uv venv && uv pip install -e ".[dev]"
 uv run alembic upgrade head
 uv run python -m mosaique.app.seed            # prints a host token
 uv run uvicorn mosaique.app.main:create_app --factory --reload --port 8000
-uv run pytest -q                              # 380, 1 deselected
+uv run pytest -q                              # 382, 1 deselected
 uv run pytest -q -m "not integration"         # 305, no database needed
 uv run pytest -q -m slow                      # the accelerated hour, ~70 s
 uv run ruff check . && uv run ruff format .
@@ -145,13 +145,15 @@ to start work without asking anyone a question.*
 ### Where the project is
 
 **Slices 0–5 are VERIFIED and merged. Slice 6A (Phase A) is in progress —
-three of its six items are done.**
+four of its six items are done.**
 
-**459 tests**: 305 backend unit, 75 backend integration and realtime against real
+**461 tests**: 305 backend unit, 77 backend integration and realtime against real
 PostgreSQL, 72 frontend unit, 2 Playwright browser specs. Plus a 60-minute
 accelerated run behind `-m slow`. All four suites were run by Aymen on his M1 on
 2026-09-08 and are green — `380 passed, 1 deselected` on the backend, matching
-what this repository produces in CI-less sandboxes exactly.
+what this repository produces in CI-less sandboxes exactly. The lifecycle test
+added on 2026-09-09 takes the backend to `382 passed, 1 deselected`; that number
+has been produced in a sandbox and **not** yet on the M1.
 
 The product works end to end for one participant on real hardware. Aymen ran a
 full manual meeting on **real MLX Kyutai + OpenAI `gpt-4o-mini`**: model loaded,
@@ -174,15 +176,18 @@ original item and exit-gate clause into exactly one of 6A/6B/6C.
 
 ### What to do next
 
-**Doable now, no hardware** — pick one and go:
+**Doable now, no hardware** — pick one of the two live items and go:
 
 1. **The remaining §15 metrics**, with a stated reason each. The spec lists them;
    `/livez`, `/readyz`, `/health/deps` already exist.
 2. **Degraded-state UX.** The health banner exists and its logic is unit-tested,
    but no browser spec ever puts a dependency *down* — its blocked and degraded
    states have never been seen rendered.
-3. **The full-lifecycle test.** Create → join → speak → end → finalize →
-   summarize → review, as one test rather than seven that each pass separately.
+3. ~~**The full-lifecycle test.**~~ **Done 2026-09-09** —
+   `backend/tests/integration/test_full_lifecycle.py`, ✅ fake. Create → join →
+   speak → end → finalize → summarize → review as one walk, on
+   `MeasuredRecognizer` over a `LocalAudioStore`, plus a second meeting through
+   the same process. What it does not cover is `PROJECT_STATE.md` L-34.
 
 **Needs Aymen's M1, do not attempt in a sandbox:** real-time factor, first-word
 and final-segment latency, memory growth, long-run MLX stability. One long
