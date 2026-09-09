@@ -106,13 +106,13 @@ uv run python tools/export_openapi.py ../frontend/openapi.json
 
 # replay harness (from backend/, against a running server)
 uv run python -m tools.replay run tools/replay/scenarios/two-participants.json \
-  --host-token "$(uv run python -m mosaique.app.seed | tail -1)" --speed 10
+  --host-token "$(uv run python -m mosaique.app.seed | awk '/^host_token:/{print $2}')" --speed 10
 
 # frontend (from frontend/)
 npm install && npm run dev
 npm run generate:api                          # regenerate typed client
-npm run typecheck && npm test && npm run build
-npm run test:e2e                              # Playwright, needs a running backend
+npm run typecheck && npm test && npm run build   # 79 unit tests
+npm run test:e2e                              # Playwright, 8 specs, needs a running backend
                                               # MOSAIQUE_CHROMIUM_PATH overrides the browser
 ```
 
@@ -145,10 +145,10 @@ to start work without asking anyone a question.*
 ### Where the project is
 
 **Slices 0–5 are VERIFIED and merged. Slice 6A (Phase A) is in progress —
-four of its six items are done.**
+five of its six items are done.**
 
-**461 tests**: 305 backend unit, 77 backend integration and realtime against real
-PostgreSQL, 72 frontend unit, 2 Playwright browser specs. Plus a 60-minute
+**474 tests**: 305 backend unit, 77 backend integration and realtime against real
+PostgreSQL, 79 frontend unit, 8 Playwright browser specs. Plus a 60-minute
 accelerated run behind `-m slow`. All four suites were run by Aymen on his M1 on
 2026-09-08 and are green — `380 passed, 1 deselected` on the backend, matching
 what this repository produces in CI-less sandboxes exactly. The lifecycle test
@@ -176,13 +176,14 @@ original item and exit-gate clause into exactly one of 6A/6B/6C.
 
 ### What to do next
 
-**Doable now, no hardware** — pick one of the two live items and go:
+**Doable now, no hardware** — one live item is left:
 
 1. **The remaining §15 metrics**, with a stated reason each. The spec lists them;
    `/livez`, `/readyz`, `/health/deps` already exist.
-2. **Degraded-state UX.** The health banner exists and its logic is unit-tested,
-   but no browser spec ever puts a dependency *down* — its blocked and degraded
-   states have never been seen rendered.
+2. ~~**Degraded-state UX.**~~ **Done 2026-09-09** — `frontend/e2e/degraded.spec.ts`
+   (6 specs). It found a real bug on the way (L-35), which is what the item was
+   for. The **join** path still has the same shape and is deliberately not
+   fixed — see `PROJECT_STATE.md` §12 before touching it.
 3. ~~**The full-lifecycle test.**~~ **Done 2026-09-09** —
    `backend/tests/integration/test_full_lifecycle.py`, ✅ fake. Create → join →
    speak → end → finalize → summarize → review as one walk, on
@@ -224,7 +225,7 @@ served a meeting.** A number measured on MLX does not describe CUDA (A-16).
 
 ## Known traps
 
-Five mistakes this codebase has actually made. Each cost real debugging time
+Six mistakes this codebase has actually made. Each cost real debugging time
 and each is easy to repeat.
 
 **Stream time is not wall time.** Silence and segment boundaries are judged in
@@ -246,6 +247,15 @@ rules with a leading slash, and check `git check-ignore -v` when a file vanishes
 30 s of silence (§7.4), and it is right to. The harness generated an hour of
 synthetic audio *after* connecting and looked exactly like a dead client;
 generate first, connect second, and yield inside any tight send loop.
+
+**A tested value with no consumer is not a tested feature.** `bannerFor`
+computed `canStartMeeting`, `status.test.ts` asserted it six times, and nothing
+read it — so with the ASR runtime down the app said *Service indisponible* and
+left **Nouvelle réunion** clickable (L-35). Every unit test was green: both
+halves were right and nothing tested the join. Found by a person on the M1, not
+by the suite. When a module exports a decision, grep for who acts on it; when two
+components need the same fact, give them one copy of it, because a second poll is
+how a banner and a button come to disagree.
 
 **A model's clock can run ahead of its own words.** On the first real fixture the
 silence tick closed 8 of 30 segments where the audio has only a 160-560 ms gap,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { type JoinResponse, token } from "./api/client";
 import { HealthBanner } from "./health/HealthBanner";
+import { ReadinessProvider } from "./health/ReadinessProvider";
 import { Mark } from "./meeting/Mark";
 import { JoinPage } from "./meeting/JoinPage";
 import { LiveMeeting } from "./meeting/LiveMeeting";
@@ -49,59 +50,61 @@ export default function App() {
   }, []);
 
   return (
-    <div className="shell">
-      <aside className="rail">
-        <div className="wordmark">
-          <Mark />
-          <h1>Mosaïque</h1>
-        </div>
-        <p>Transcription et mémoire de réunion, en français.</p>
-        <div className="rail-foot">
-          Prototype · Tranche 1
-          {authenticated && !isJoinFlow && (
-            <>
-              <br />
-              <button
-                className="btn-quiet"
-                style={{ marginTop: 10, padding: "5px 10px", fontSize: 12 }}
-                onClick={() => {
-                  token.clear();
-                  setAuthenticated(false);
-                }}
-              >
-                Changer de jeton
-              </button>
-            </>
+    <ReadinessProvider>
+      <div className="shell">
+        <aside className="rail">
+          <div className="wordmark">
+            <Mark />
+            <h1>Mosaïque</h1>
+          </div>
+          <p>Transcription et mémoire de réunion, en français.</p>
+          <div className="rail-foot">
+            Prototype · Tranche 1
+            {authenticated && !isJoinFlow && (
+              <>
+                <br />
+                <button
+                  className="btn-quiet"
+                  style={{ marginTop: 10, padding: "5px 10px", fontSize: 12 }}
+                  onClick={() => {
+                    token.clear();
+                    setAuthenticated(false);
+                  }}
+                >
+                  Changer de jeton
+                </button>
+              </>
+            )}
+          </div>
+        </aside>
+
+        <main className="main">
+          {/* Above the view, not inside it: a dependency being down is true on
+              every screen, and the join page is exactly where someone most needs
+              to be told before they start talking. */}
+          <HealthBanner />
+
+          {view.name === "join" ? (
+            <JoinPage
+              meetingId={view.meetingId}
+              inviteToken={view.inviteToken}
+              onJoined={(joined) => setView({ name: "live", joined })}
+            />
+          ) : view.name === "live" ? (
+            <LiveMeeting
+              joined={view.joined}
+              isHost={authenticated}
+              onEnded={() => openReview(view.joined.meeting.id)}
+            />
+          ) : !authenticated ? (
+            <TokenGate onReady={() => setAuthenticated(true)} />
+          ) : view.name === "review" ? (
+            <ReviewPage meetingId={view.meetingId} onBack={goToList} />
+          ) : (
+            <MeetingList onOpenReview={openReview} />
           )}
-        </div>
-      </aside>
-
-      <main className="main">
-        {/* Above the view, not inside it: a dependency being down is true on
-            every screen, and the join page is exactly where someone most needs
-            to be told before they start talking. */}
-        <HealthBanner />
-
-        {view.name === "join" ? (
-          <JoinPage
-            meetingId={view.meetingId}
-            inviteToken={view.inviteToken}
-            onJoined={(joined) => setView({ name: "live", joined })}
-          />
-        ) : view.name === "live" ? (
-          <LiveMeeting
-            joined={view.joined}
-            isHost={authenticated}
-            onEnded={() => openReview(view.joined.meeting.id)}
-          />
-        ) : !authenticated ? (
-          <TokenGate onReady={() => setAuthenticated(true)} />
-        ) : view.name === "review" ? (
-          <ReviewPage meetingId={view.meetingId} onBack={goToList} />
-        ) : (
-          <MeetingList onOpenReview={openReview} />
-        )}
-      </main>
-    </div>
+        </main>
+      </div>
+    </ReadinessProvider>
   );
 }

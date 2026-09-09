@@ -90,6 +90,45 @@ export function bannerFor(readiness: ReadinessResponse | null): HealthBanner {
 }
 
 /**
+ * Whether starting a meeting should be refused right now.
+ *
+ * `bannerFor` already decides this — the point of this function is the third
+ * input state the banner never had to handle. `undefined` means the first
+ * readiness check has not come back, and blocking on that would disable the
+ * button for the first half second of every page load. **Not knowing yet is not
+ * the same as knowing something is wrong**, so it does not block.
+ *
+ * Consumers must use this rather than re-deriving the rule: the bug this was
+ * written for (2026-09-09, found by hand on M1) was a banner and a button
+ * disagreeing about the same readiness payload, and two copies of the rule is
+ * how that happens again.
+ */
+export function meetingCreationBlocked(readiness: ReadinessResponse | null | undefined): boolean {
+  if (readiness === undefined) return false;
+  return !bannerFor(readiness).canStartMeeting;
+}
+
+/**
+ * Why the create button is disabled, in one short line beside it.
+ *
+ * The banner above already carries the full consequence; repeating it here
+ * would be noise. This is the label a person needs at the moment they click and
+ * nothing happens — a disabled control with no reason is worse than one that
+ * fails loudly.
+ */
+export function creationBlockedReason(readiness: ReadinessResponse | null | undefined): string {
+  if (readiness === undefined) return "";
+  if (readiness === null) return "Serveur injoignable : impossible de créer une réunion.";
+  if (!meetingCreationBlocked(readiness)) return "";
+  const gating = (readiness.dependencies ?? [])
+    .filter((d) => d.state !== "ok" && d.gates_readiness)
+    .map((d) => d.name);
+  return gating.includes("asr_runtime")
+    ? "Création désactivée : la transcription est indisponible."
+    : "Création désactivée : le serveur n'est pas prêt.";
+}
+
+/**
  * The technical detail, for someone who is going to go and fix it.
  *
  * Kept apart from `message` on purpose: the sentence above is for a person who

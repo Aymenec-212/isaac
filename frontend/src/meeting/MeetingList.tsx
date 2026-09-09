@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api, token, type Meeting } from "../api/client";
+import { useReadiness } from "../health/ReadinessProvider";
+import { creationBlockedReason, meetingCreationBlocked } from "../health/status";
 
 const STATE_LABELS: Record<string, string> = {
   CREATED: "Créée",
@@ -27,6 +29,12 @@ export function MeetingList({ onOpenReview }: { onOpenReview: (meetingId: string
   const [creating, setCreating] = useState(false);
   const [invite, setInvite] = useState<string | null>(null);
 
+  // The same readiness the banner above is rendering, from the same poll. A
+  // meeting whose transcription engine is down records audio nobody can read,
+  // so the honest thing is to refuse it here rather than to warn and allow.
+  const readiness = useReadiness();
+  const blocked = meetingCreationBlocked(readiness);
+
   const load = useCallback(async () => {
     try {
       const { meetings } = await api.listMeetings();
@@ -43,7 +51,7 @@ export function MeetingList({ onOpenReview }: { onOpenReview: (meetingId: string
   }, [load]);
 
   async function create() {
-    if (!title.trim()) return;
+    if (!title.trim() || blocked) return;
     setCreating(true);
     try {
       const created = await api.createMeeting(title.trim());
@@ -83,10 +91,24 @@ export function MeetingList({ onOpenReview }: { onOpenReview: (meetingId: string
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void create()}
         />
-        <button className="btn-primary" onClick={() => void create()} disabled={creating || !title.trim()}>
+        <button
+          className="btn-primary"
+          onClick={() => void create()}
+          disabled={creating || !title.trim() || blocked}
+          aria-describedby={blocked ? "creation-blocked" : undefined}
+        >
           {creating ? "Création…" : "Nouvelle réunion"}
         </button>
       </div>
+
+      {/* A disabled control with no stated reason is worse than one that fails
+          loudly. The banner above carries the full consequence; this is the one
+          line needed at the moment someone clicks and nothing happens. */}
+      {blocked && (
+        <p className="field-note" id="creation-blocked" role="status">
+          {creationBlockedReason(readiness)}
+        </p>
+      )}
 
       {invite && (
         <div className="notice">
