@@ -2,7 +2,7 @@
 
     # against a server started with `uv run uvicorn ... --port 8000`
     uv run python -m tools.replay run scenarios/two-participants.json \
-        --host-token "$(uv run python -m mosaique.app.seed | tail -1)" \
+        --host-token "$(uv run python -m mosaique.app.seed | awk '/^host_token:/{print $2}')" \
         --speed 10 --report /tmp/replay.json
 
     # write a fixture a scenario can point at

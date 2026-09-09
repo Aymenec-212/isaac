@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ReadinessResponse } from "../api/client";
-import { bannerFor, diagnosticLines, pollIntervalMs } from "./status";
+import {
+  bannerFor,
+  creationBlockedReason,
+  diagnosticLines,
+  meetingCreationBlocked,
+  pollIntervalMs,
+} from "./status";
 
 const dep = (name: string, state: string, gates: boolean) => ({
   name,
@@ -131,5 +137,85 @@ describe("polling", () => {
     // working server does not need checking every few seconds.
     expect(pollIntervalMs("ok")).toBeGreaterThan(pollIntervalMs("blocked"));
     expect(pollIntervalMs("unreachable")).toBe(pollIntervalMs("blocked"));
+  });
+});
+
+/**
+ * The gap that let a real bug through, found by hand on M1 on 2026-09-09.
+ *
+ * `canStartMeeting` was computed correctly and asserted six times above — and
+ * nothing consumed it. The banner said "Service indisponible" with the ASR
+ * runtime down while **Nouvelle réunion** stayed clickable. These tests cover
+ * the function `MeetingList` now calls, including the input state the banner
+ * never had to handle.
+ */
+describe("whether creating a meeting is allowed", () => {
+  it("does not block while the first check is still in flight", () => {
+    // `undefined` is not knowing yet. Blocking on it would disable the button
+    // for the first half second of every page load.
+    expect(meetingCreationBlocked(undefined)).toBe(false);
+    expect(creationBlockedReason(undefined)).toBe("");
+  });
+
+  it("allows creation when every dependency is healthy", () => {
+    const healthy = readiness([
+      dep("database", "ok", true),
+      dep("asr_runtime", "ok", true),
+      dep("llm_provider", "ok", false),
+    ]);
+
+    expect(meetingCreationBlocked(healthy)).toBe(false);
+    expect(creationBlockedReason(healthy)).toBe("");
+  });
+
+  it("blocks creation when the transcription engine is not ready", () => {
+    // The exact case the manual run found: a meeting recorded now would produce
+    // audio nobody can read.
+    const asrDown = readiness([dep("database", "ok", true), dep("asr_runtime", "unknown", true)]);
+
+    expect(meetingCreationBlocked(asrDown)).toBe(true);
+    expect(creationBlockedReason(asrDown)).toContain("transcription");
+  });
+
+  it("blocks creation when the database is down", () => {
+    const dbDown = readiness([dep("database", "unavailable", true), dep("asr_runtime", "ok", true)]);
+
+    expect(meetingCreationBlocked(dbDown)).toBe(true);
+    expect(creationBlockedReason(dbDown)).not.toBe("");
+  });
+
+  it("still allows creation when only the summary provider is down", () => {
+    // The other half of the manual run, and the half that already behaved. The
+    // meeting, the transcript and the persistence all work without the LLM;
+    // refusing here would deny a meeting that would have succeeded.
+    const llmDown = readiness([
+      dep("database", "ok", true),
+      dep("asr_runtime", "ok", true),
+      dep("llm_provider", "unavailable", false),
+    ]);
+
+    expect(meetingCreationBlocked(llmDown)).toBe(false);
+    expect(creationBlockedReason(llmDown)).toBe("");
+  });
+
+  it("blocks creation when the server did not answer at all", () => {
+    expect(meetingCreationBlocked(null)).toBe(true);
+    expect(creationBlockedReason(null)).toContain("injoignable");
+  });
+
+  it("agrees with the banner on every payload, which is the invariant that broke", () => {
+    // Two copies of this rule is how a banner and a button come to disagree.
+    // This asserts there is only one.
+    const payloads = [
+      readiness([dep("database", "ok", true), dep("asr_runtime", "ok", true)]),
+      readiness([dep("asr_runtime", "unknown", true)]),
+      readiness([dep("database", "unavailable", true)]),
+      readiness([dep("llm_provider", "unavailable", false)]),
+      null,
+    ];
+
+    for (const payload of payloads) {
+      expect(meetingCreationBlocked(payload)).toBe(!bannerFor(payload).canStartMeeting);
+    }
   });
 });

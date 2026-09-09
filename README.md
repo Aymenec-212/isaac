@@ -93,7 +93,7 @@ replay is a failure you can fix.
 cd backend
 # a scenario is a timing script: who speaks, from when, out of which fixture
 uv run python -m tools.replay run tools/replay/scenarios/two-participants.json \
-  --host-token "$(uv run python -m mosaique.app.seed | tail -1)" \
+  --host-token "$(uv run python -m mosaique.app.seed | awk '/^host_token:/{print $2}')" \
   --speed 10 --report /tmp/replay.json
 
 # fixtures are raw 24 kHz s16le mono; synthesise one, or point at a recording

@@ -562,6 +562,20 @@ input[type="text"] {
   }
 }
 
+/* Why the create button is dead. Same red as the blocking banner it belongs
+   to, so the two read as one statement rather than two unrelated warnings. */
+.field-note {
+  margin: -4px 0 12px;
+  font-size: 13px;
+  color: #b3261e;
+}
+
+@media (prefers-color-scheme: dark) {
+  .field-note {
+    color: #f2b8b5;
+  }
+}
+
 /* --- Slice 6A: transcript search (FR-10) -------------------------------- */
 
 .transcript-search {

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { api, type ReadinessResponse } from "../api/client";
-import { bannerFor, diagnosticLines, pollIntervalMs } from "./status";
+import { useState } from "react";
+import { useReadiness } from "./ReadinessProvider";
+import { bannerFor, diagnosticLines } from "./status";
 
 /**
  * Shows which dependency is broken, when one is (tech spec 15).
@@ -13,35 +13,11 @@ import { bannerFor, diagnosticLines, pollIntervalMs } from "./status";
  * this appears only when it has something to say.
  */
 export function HealthBanner() {
-  const [readiness, setReadiness] = useState<ReadinessResponse | null | undefined>(undefined);
+  // The poll lives in `ReadinessProvider` now, not here. `MeetingList` needs the
+  // same verdict to decide whether creating a meeting is allowed, and a banner
+  // that owned the only copy is precisely how the two came to disagree.
+  const readiness = useReadiness();
   const [showDetail, setShowDetail] = useState(false);
-  const timer = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const check = async () => {
-      let next: ReadinessResponse | null;
-      try {
-        next = await api.readiness();
-      } catch {
-        // Distinct from a dependency being down: nothing answered at all.
-        next = null;
-      }
-      if (cancelled) return;
-      setReadiness(next);
-      timer.current = window.setTimeout(
-        () => void check(),
-        pollIntervalMs(bannerFor(next).severity),
-      );
-    };
-
-    void check();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer.current);
-    };
-  }, []);
 
   // `undefined` is "the first check has not come back". Showing "server
   // unreachable" for that half-second would be a lie every time the page loads.

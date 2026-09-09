@@ -9,7 +9,7 @@
  * Needs the app running: the backend on :8000 and the dev server on :5173.
  *
  *   npx playwright install chromium   # or set MOSAIQUE_CHROMIUM_PATH
- *   MOSAIQUE_HOST_TOKEN="$(cd ../backend && uv run python -m mosaique.app.seed | tail -1)" \
+ *   MOSAIQUE_HOST_TOKEN="$(cd ../backend && uv run python -m mosaique.app.seed | awk '/^host_token:/{print $2}')" \
  *     npx playwright test
  */
 import { expect, test } from "@playwright/test";
