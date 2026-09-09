@@ -1,9 +1,14 @@
 # PROJECT_STATE.md
 
 **Project:** Mosaïque — realtime meeting intelligence, French-first
-**Last updated:** 2026-09-08 (rev 14 — re-sequenced into Phases A/B/C)
-**Updated by:** Slice 6A kickoff session
+**Last updated:** 2026-09-09 (rev 18 — handoff for a fresh session)
+**Updated by:** Slice 6A session, handing over
 **Current slice:** **Slice 6A — the single-user product, hardened. PHASE A.**
+Three of six items done: health endpoints, transcript search, A-14 under real
+emission timing. **Three left, all doable without hardware — see §12.**
+
+*(Header revision drifted between rev 14 and rev 17: changelog rows were appended
+without bumping this line. Corrected here; §11 is the authoritative history.)*
 
 **The plan was re-sequenced on 2026-09-08** (`docs/IMPLEMENTATION_PLAN.md` v1.3).
 The remaining work now splits into three phases: **A** hardens the complete
@@ -109,14 +114,14 @@ about **two real streams at once**, which MLX cannot do at all (L-26).
 
 | Field | Value |
 |---|---|
-| Repository | `main` through PR #8 (Slice 5). Work branch `claude/awesome-ritchie-iu6uut`, restarted from `main` after each merge |
+| Repository | `main` through PR #11 (Slice 6A: measured timing). Work branch `claude/awesome-ritchie-iu6uut`, restarted from `main` after each merge |
 | Runnable | yes — `docker compose up`, or uv + local PostgreSQL |
 | Deployed | no |
 | Real audio ever transcribed by this system | **yes, once, end to end.** 116.36 s of French through the running app-server against real MLX Kyutai on Apple silicon, 2026-09-08 — `docs/slice4-last-test-report.json`. 1.43% WER, 30 segments, all persisted, meeting `COMPLETED`. One speaker, one stream, one machine, and never in this environment (L-27) |
-| Tests passing | **459**: 305 backend unit, 75 backend integration and realtime (real PostgreSQL), 72 frontend unit, 2 Playwright browser specs — **all four suites re-run by Aymen on 2026-09-08, Playwright included**. Plus one opt-in accelerated hour behind `-m slow`. Backend re-run in this session — `380 passed, 1 deselected in 98.38s`; frontend `72 passed`; `npm run build` clean. The 2 Playwright specs are carried forward from rev 9 and were **not** re-run against the new review page (L-32). **None of these executes a model or a provider**: the ASR evidence is a report (L-27) and the LLM has never been called (L-31) |
+| Tests passing | **459**: 305 backend unit, 75 backend integration and realtime (real PostgreSQL), 72 frontend unit, 2 Playwright browser specs — **all four suites re-run by Aymen on 2026-09-08, Playwright included**. Plus one opt-in accelerated hour behind `-m slow`. **Re-run by Aymen on his M1, 2026-09-08 — all green.** Backend `380 passed, 1 deselected`, matching this sandbox exactly; measured-timing and reconnect/idle/health subsets green; frontend `72 passed`; PostgreSQL healthy in Docker; **`/readyz` ready with MLX weights and database healthy**; frontend serving on `127.0.0.1:5173`. `npm run build` clean. The 2 Playwright specs are carried forward from rev 9 and were **not** re-run against the new review page (L-32). **None of these executes a model or a provider**: the ASR evidence is a report (L-27) and the LLM has never been called (L-31) |
 | Lint / types | ruff clean; ruff format clean; mypy strict clean on 88 source files; `tsc --noEmit` clean; `openapi.json` regenerated with no drift |
 | Known gap | A-8 unvalidated: every run so far is loopback on one machine. Spike A not run. A-3, A-16 and `moshi_server` all still need a CUDA host. **No CI runs on this repository** — see L-18, which now also means the one run that proves Slice 4 is reproducible only by hand, on hardware. |
-| Next action | **Slice 6A, continued.** A-14 is largely answered without hardware (see §7). What is left needs the Mac and is Aymen's: **real-time factor, first-word and final-segment latency, memory growth, and long-run stability against MLX** — one long `tools/replay` run at `--speed 1` produces the first three. Mine, meanwhile: the remaining §15 metrics, degraded-state UX, and the full-lifecycle test |
+| Next action | **Slice 6A, three items left.** No hardware needed, any agent can start: the remaining §15 metrics; degraded-state UX (the banner's failure states have never been rendered); the full-lifecycle test. Needs Aymen's M1: real-time factor, first-word and final-segment latency, memory growth, long-run MLX stability. **Start from §12** |
 | Next gate | **Slice 6A exit:** a realistic single-user meeting runs repeatedly on M1 + MLX with a trustworthy transcript and outputs; search returns the right segments; `/readyz` distinguishes each dependency being down; the seven §1.3 criteria that need no concurrency have named tests; every single-stream `[measure]` row has a number. **Slice 5's gate is still open on its numbers** — ten meetings and A-6's rejection rate — and is now tracked as Phase A work rather than as a blocker |
 
 ---
@@ -171,13 +176,13 @@ about **two real streams at once**, which MLX cannot do at all (L-26).
 | FR-01 | Meeting creation with unique ID | Slice 0/1 | **VERIFIED** | `test_create_meeting_then_read_it_back` | ULID; `organization_id` from migration 1 |
 | FR-02 | Continuous microphone capture | Slice 1 | **VERIFIED** | `e2e/meeting.spec.ts`, `e2e/two-participants.spec.ts` (Chromium fake device) | AudioWorklet 48→24 kHz, 80 ms frames |
 | FR-03 | Realtime transcription | Slice 1 (fake) / Slice 4 (real) | **VERIFIED, fake and real** | `test_speaking_produces_live_interim_then_final_segments`; real model in `docs/slice4-last-test-report.json` (1.43% WER) | The real half is a report no test re-runs (L-27) |
-| FR-04 | Interim and final events | Slice 1 | **VERIFIED** | `tests/unit/test_segmenter.py` (12), `reconciler.test.ts` (11), flow test asserts both statuses |
+| FR-04 | Interim and final events | Slice 1 | **VERIFIED** | `tests/unit/test_segmenter.py` (12), `reconciler.test.ts` (11), flow test asserts both statuses | |
 | FR-05 | Speaker association | Slice 2 | **VERIFIED (endpoint capture)** | `test_the_harness_merges_two_attributed_streams`, `e2e/two-participants.spec.ts` | Two streams, each segment under its own speaker, in both browsers. Attribution when one microphone hears another person is Spike A and is **not** covered (L-2) |
-| FR-06 | Finalized transcript | Slice 1 | **VERIFIED** | `test_only_final_segments_reach_the_database`, `test_startup_recovery_completes_a_stranded_finalizing_meeting` |
+| FR-06 | Finalized transcript | Slice 1 | **VERIFIED** | `test_only_final_segments_reach_the_database`, `test_startup_recovery_completes_a_stranded_finalizing_meeting` | |
 | FR-07 | Meeting summary | Slice 1 (fake) / Slice 5 (real) | **VERIFIED (fake only)** | `test_processor_produces_evidence_linked_outputs` | The real provider is merged and unit-tested but has never been called (L-31) |
 | FR-08 | Action item extraction | Slice 1 (fake) / Slice 5 (real) | **VERIFIED (fake only)** | same test; evidence ids checked against real segments | Same caveat as FR-07 (L-31) |
 | FR-09 | Decision extraction | Slice 1 (fake) / Slice 5 (real) | **VERIFIED (fake only)** | same test | Same caveat as FR-07 (L-31) |
-| FR-10 | Transcript review and search | read: Slice 1, search: Slice 6A | **VERIFIED** ✅ fake | `GET /transcript?q=` — `test_transcript_search.py` (18), 4 route tests, `highlight.test.ts` (12). Accent-insensitive, a deliberate deviation from §6's "ILIKE for now" because French. Meeting-scoped only — L-33 |
+| FR-10 | Transcript review and search | read: Slice 1, search: Slice 6A | **VERIFIED** ✅ fake | `GET /transcript?q=` — `test_transcript_search.py` (18), 4 route tests, `highlight.test.ts` (12). Accent-insensitive, a deliberate deviation from §6's "ILIKE for now" because French. Meeting-scoped only — L-33 | |
 | FR-11 | Timestamp navigation | Slice 5 | **VERIFIED (server side); browser side untested** | `tests/integration/test_audio_playback.py` (7), `playback.test.ts` (11), `evidence.test.ts` (11) | Range route, offset arithmetic and citation resolution all covered. Nobody has clicked a citation in a real browser — L-32 |
 
 ### Non-functional
@@ -445,6 +450,7 @@ Current, as of planning. Each is a deliberate choice, not an oversight.
 
 | Date | Change |
 |---|---|
+| 2026-09-09 | **rev 18. Handoff. Local validation on M1 recorded; nothing built.** Aymen pulled the branch to his own machine and ran everything: backend **`380 passed, 1 deselected`** — matching this sandbox exactly, which is the cross-check that matters most given there is no CI (L-18) — the measured-timing and reconnect/idle/health subsets green, frontend `72 passed`, PostgreSQL healthy in Docker, the frontend serving on `127.0.0.1:5173`, and **`/readyz` reporting ready with MLX weights and the database healthy**. That last one is the first time the readiness endpoint has been exercised against real weights rather than a fake backend, and it is what moves the health work from ✅ fake to ✅ M1 + MLX. One number disagreed and is recorded rather than smoothed over: the measured-timing file collects **11** tests here and was reported as 10, most likely a `-k` filter difference; the file's own count is the verifiable one. Then the handoff itself: `CLAUDE.md`'s current-state section was rewritten for a cold start — where the project is, the three phases, the next three tasks with what "done" means for each, a table of decisions that must not be re-litigated (L-28 deferred, Q2's residency half open, L-33's search deviation deliberate), and where each claim was verified. §12 gained a **START HERE** block naming those three tasks concretely. Also corrected: this file's header said rev 14 while §11 carried rows through rev 17 — changelog rows had been appended without bumping the header. §11 was always the authoritative history; the header now agrees with it. **No code changed in this revision.** |
 | 2026-09-08 | **rev 17. Slice 6A task 1 validated on real hardware; A-14 largely answered without any.** Aymen ran the full stack on M1: both Playwright specs pass against the rewritten review page, the health banner and the search box — **L-32 closes** — and a manual end-to-end meeting on real MLX Kyutai plus OpenAI `gpt-4o-mini` went the whole way: model loaded, readiness checks green, live French transcript, persisted on end, summary generated, actions with timestamps, evidence rendered. Health endpoints move from ✅ fake to ✅ fake + ✅ M1 + MLX. **Then the interesting half.** Seven things remained unmeasured, and most of them looked like they needed Apple silicon. They did not all: the ones that are really about *how the runtime reacts to a model's timing* can be answered from data already in the repository. `docs/mosaique-b1-main/b1-tokens.jsonl` is a token-by-token log of a real MLX run — 162 tokens, each with the stream position it was emitted at — and `sum(pieces) == len(tokens)` pairs them exactly onto the 92 assembled words, giving **the stream offset at which a real model actually produced each word**. `MeasuredRecognizer` replays that. The runtime now meets word gaps of **p50 320 ms, p95 1 280 ms, max 24 080 ms** instead of a metronome, replayed in stream time so it stays speed-invariant (ADR-11). Under it: a meeting transcribes in order, the fixture's 24-second hole does **not** trigger an idle close — that path is keyed to frames, not events, and now there is a test saying so — a reconnect landing mid-burst neither duplicates nor loses segments, and ending while the model still owes ~500 ms of words flushes the tail rather than dropping it. A-14 goes from *partially answered* to *largely answered*. One correction caught in review of my own numbers: the first draft quoted **token**-level gaps (p50 80 ms) in a docstring describing a **word**-level emitter; the fixture is burstier at the token layer, but the runtime never sees tokens, so the claim was wrong at the level it was made. Backend 365 -> 380. **Still needing the Mac, unchanged and not claimed:** real-time factor, first-word and final-segment latency, memory growth, and long-run MLX stability. |
 | 2026-09-08 | **rev 16. Slice 6A: transcript search (FR-10), and a deliberate deviation from the spec.** §6 says `?q=` should be "ILIKE for now". It is not, and the reason is the product: PostgreSQL's `ILIKE` is accent-sensitive, so a French speaker typing `reunion` would find nothing in a transcript that says `réunion` — a trust failure in the one feature whose job is finding what was said, and people skip accents constantly. `CREATE EXTENSION unaccent` was the obvious alternative and wants privileges a local `docker compose` or a hosted database may not grant, which is a poor trade during a phase whose whole point is that the local path works. So matching happens in Python, after the fetch — which costs nothing extra, because rendering a transcript already loads every segment. **The subtle part is the folding.** NFD splits `é` into two code points, so stripping combining marks would shorten the string and slide every later offset; the fold is therefore per character, one in and one out, and a test asserts `text[start:end] == "budget"` on a sentence with an accent *before* the match — an assertion that only checked "a span was found" would have passed on broken arithmetic. Offsets are returned by the server rather than recomputed in the browser, because duplicating accent-folding in two languages is two implementations that drift and a highlight that lands a character off on every `é`. The client is defensive anyway: spans that arrive reversed, negative, out of range or overlapping are dropped, and a test asserts the rendered parts always rejoin to the original text — a scrambled sentence would be worse than an unhighlighted one. The review page debounces and discards any response whose echoed `query` is not what is still in the box, so a slow answer for `bud` cannot land after a fast one for `budget`. Backend 343 -> 365, frontend 60 -> 72. The deviation is **L-33**, recorded with its two other consequences: search is meeting-scoped, and it is linear. |
 | 2026-09-08 | **rev 15. Slice 6A begins: health endpoints that say *which* dependency broke.** First Phase A task, chosen because Phase A means running meetings repeatedly on a laptop and the cost of a bad run is mostly the time spent guessing why. `/readyz` and `/health/deps` now exist alongside `/livez`, and the three answer deliberately different questions: is the process up, could this instance take a meeting, and what is each dependency doing. Per §15 the **LLM provider is listed but does not gate readiness** — a meeting records, transcribes and persists without it and only the summary waits, so failing readiness there would refuse meetings that would have worked; the flag is carried in the response as data rather than as an `if` in the route, so a reader can see why. The ASR probe asks the recognizer **through the seam**: `RecognizerReadiness` is a new method on the `StreamingRecognizer` Protocol with no default, following the L-25 lesson that a capability read with `getattr(..., default)` gets the default silently — and here the tempting default, "ready", is the one that turns a broken runtime into a green health check. It has **three** states, not two: `unknown` exists because "I have not checked" is a real answer, and `/readyz` treats it as not-ready. That is what keeps `moshi_server` honest — it reports `unknown` rather than vouching for a server nobody has ever reached (L-27), so the gap stays visible until Slice 6B implements a real probe. Probes run concurrently with a 3 s timeout each and are individually guarded, because a health endpoint that hangs or 500s during an outage is worse than none. The frontend gained a banner that renders **only when something is wrong**, leads with what blocks the meeting rather than what delays the summary, and hides the technical detail behind a toggle. Backend 315 -> 343, frontend 49 -> 60; `ruff`, `mypy`, `npm run build` clean, OpenAPI regenerated (10 paths). Not claimed: the banner has never been seen in a browser (L-32), and nothing here has met a real MLX runtime — `readiness()` on the MLX path is ⚠, exercised only through a fake backend. |
@@ -471,6 +477,44 @@ Current, as of planning. Each is a deliberate choice, not an oversight.
 Written so a cold session can start without re-deriving anything. This section
 describes **intent**, unlike the rest of this file; when it disagrees with the
 tables above, the tables are right.
+
+### START HERE — the next three tasks (2026-09-09 handoff)
+
+Phase A, Slice 6A. Health endpoints, transcript search and A-14 are done. **All
+three below need no hardware and no permission — pick one and start.** Each names
+what "done" looks like, so you are not guessing at a bar.
+
+**1. The remaining §15 metrics, with a stated reason each.**
+The spec lists them (`meetings_active`, `audio_frames_received_total`,
+`transcript_first_word_latency_ms`, and about twenty more). `/livez`, `/readyz`
+and `/health/deps` already exist; this is the counters-and-histograms half.
+*The "stated reason each" is the point* — the plan asks for it because a metric
+nobody can name a use for is a metric nobody reads. Done when each emitted metric
+has a one-line reason and a test that it moves when the thing it measures
+happens.
+
+**2. Degraded-state UX.**
+`frontend/src/health/` has a banner whose logic is unit-tested (11 tests) — but
+**no browser spec has ever put a dependency down**, so its blocked and degraded
+states have never actually rendered. Done when a Playwright spec drives the app
+with a dependency failing and asserts what a person sees. This is the smallest of
+the three and the one most likely to find a real bug.
+
+**3. The full-lifecycle test.**
+Create → join → speak → end → finalize → summarize → review, as **one** test.
+Every step passes today in isolation; nothing asserts they compose. Done when a
+single test walks the whole chain and checks the transcript and outputs at the
+end. Note `tests/realtime/test_measured_thresholds.py` for the fixture pattern —
+`MeasuredRecognizer` is the realistic choice here, not `FakeRecognizer`.
+
+**Do not attempt in a sandbox** — these need Aymen's M1 and are his to run:
+real-time factor, first-word and final-segment latency, memory growth, long-run
+MLX stability. One long `tools/replay run … --speed 1` against MLX yields the
+first three from the report it already writes.
+
+**Before you change anything, read `CLAUDE.md` "Decisions already made".** L-28
+is deferred by decision, Q2's residency half is open, and the search deviation
+(L-33) is deliberate. Re-opening any of them unprompted wastes a session.
 
 ### Environment, from a clean container
 
