@@ -137,69 +137,83 @@ A slice is not finished until step 3 is done.
 
 ---
 
-## Current state (2026-09-08)
+## Current state (2026-09-09)
 
-**Slices 0 through 4 are VERIFIED and merged to `main`. Slice 5 is code
-complete, its gate open.** 366 tests: 258 backend unit, 57 backend integration
-and realtime against real PostgreSQL, 49 frontend unit, 2 Playwright specs —
-plus a 60-minute accelerated run behind `-m slow` that passes at 54.8x realised
-with no memory growth.
+*Read this section, then `PROJECT_STATE.md` §12. Between them you should be able
+to start work without asking anyone a question.*
 
-**Slice 5 works against the real provider** — confirmed by Aymen on 2026-09-08.
-The OpenAI adapter, strict structured outputs, the FR-11 audio route and the
-evidence-linked review page all function end to end. What is **not** measured:
-the ten-meeting run, A-6's schema-rejection rate split by reason, and cost per
-meeting (L-31). One good run is not a rate.
+### Where the project is
 
-**The plan was re-sequenced on 2026-09-08 into three phases.** Read
-`docs/IMPLEMENTATION_PLAN.md` v1.3 before picking up work:
+**Slices 0–5 are VERIFIED and merged. Slice 6A (Phase A) is in progress —
+three of its six items are done.**
 
-- **Phase A — now.** Slice 6A: harden the complete single-user product on
-  M1 + MLX. Health endpoints per dependency, transcript search, a long run
-  against the real runtime, full-lifecycle tests, degraded-state UX.
-- **Phase B.** Slice 6B: deploy `moshi-server` on a dedicated NVIDIA host and
-  measure the production serving path. Blocked on hardware, not on code.
-- **Phase C.** Slice 6C: four participants, with the original Slice 6 exit gate
-  carried over unchanged.
+**459 tests**: 305 backend unit, 75 backend integration and realtime against real
+PostgreSQL, 72 frontend unit, 2 Playwright browser specs. Plus a 60-minute
+accelerated run behind `-m slow`. All four suites were run by Aymen on his M1 on
+2026-09-08 and are green — `380 passed, 1 deselected` on the backend, matching
+what this repository produces in CI-less sandboxes exactly.
 
-**Slice 6 was split, not reduced.** Four participants, concurrent ASR, CUDA
-validation and GPU benchmarking are all postponed and all still tracked. **L-26
-— MLX serves one stream per process — is therefore no longer an immediate
-blocker**: it is sufficient for Phase A and disqualifying for Phase C, and the
-only thing that changed is which one is next.
+The product works end to end for one participant on real hardware. Aymen ran a
+full manual meeting on **real MLX Kyutai + OpenAI `gpt-4o-mini`**: model loaded,
+`/readyz` green with MLX weights and PostgreSQL healthy, live French transcript,
+persisted on end, summary generated, actions with timestamps, evidence rendered
+on the review page.
 
-**Real French audio has now been transcribed end to end, once.** 116.36 s
-through the running app-server against real MLX Kyutai on Apple silicon,
-2026-09-08: **1.43% WER**, p95 first-word latency **1 934 ms**, 30 segments all
-persisted, `asr_version` written as `kyutai/stt-1b-en_fr@mlx-bf16` by the
-app-server rather than hard-coded. Evidence: `docs/slice4-last-test-report.json`.
+### The three phases
 
-Read that as narrowly as it deserves. It is one speaker, one stream, one
-prepared monologue, clean audio, on one machine — and **nothing re-runs it**:
-the model path needs Apple silicon, this repository has no CI (L-18), and no
-sandboxed session can execute it. Of the latency, 1 343 ms of 1 343 ms is the
-model; the transport either side is noise.
+Re-sequenced 2026-09-08. Read `docs/IMPLEMENTATION_PLAN.md` v1.3 before picking
+up work.
 
-The same run found a defect its WER could not see: **8 of 30 segments are a
-sentence's final word alone in a 160-400 ms segment** (L-28). **Deferred by
-decision, not oversight** — reassess at the end of Slice 5, and only if it has
-shown real impact on meeting intelligence, evidence linking or transcript
-correctness. `tests/unit/test_l28_orphaned_final_word.py` pins its shape
-meanwhile; Slice 5 builds no special case around it. Do not reopen it
-unprompted, and do not encode its suspected cause anywhere — that is still a
-hypothesis.
+- **Phase A — now.** Slice 6A: harden the single-user product on M1 + MLX.
+- **Phase B.** Slice 6B: `moshi-server` on a dedicated NVIDIA host, and measure
+  the production serving path. Blocked on hardware, not on code.
+- **Phase C.** Slice 6C: four participants, original Slice 6 exit gate intact.
 
-Still hardware-blocked, now explicitly Phase B/C rather than open-ended: A-3 and
-A-16 and `moshi_server` and `EndOfTurnEvent` (a CUDA host), the cross-network run
-(A-8), Spike A, and the GPU half of A-9.
+**Slice 6 was split, not reduced.** The plan carries tables mapping every
+original item and exit-gate clause into exactly one of 6A/6B/6C.
 
-**Say where, not just whether.** `PROJECT_STATE.md` §0 now carries a
-validation-environment vocabulary — ✅ M1 + MLX, ✅ fake, ⚠ implemented-not-
-validated, ❌ needs NVIDIA, ❌ needs cross-network — because a number measured on
-MLX does not describe CUDA (A-16). **Never mark the production GPU serving path
-verified until it has actually served a meeting.**
+### What to do next
 
-Next: **Slice 6A**. Start from `PROJECT_STATE.md` §12.
+**Doable now, no hardware** — pick one and go:
+
+1. **The remaining §15 metrics**, with a stated reason each. The spec lists them;
+   `/livez`, `/readyz`, `/health/deps` already exist.
+2. **Degraded-state UX.** The health banner exists and its logic is unit-tested,
+   but no browser spec ever puts a dependency *down* — its blocked and degraded
+   states have never been seen rendered.
+3. **The full-lifecycle test.** Create → join → speak → end → finalize →
+   summarize → review, as one test rather than seven that each pass separately.
+
+**Needs Aymen's M1, do not attempt in a sandbox:** real-time factor, first-word
+and final-segment latency, memory growth, long-run MLX stability. One long
+`tools/replay run … --speed 1` against MLX produces the first three from the
+report it already writes; only the last needs duration.
+
+### Decisions already made — do not re-litigate these
+
+| Decision | Status |
+|---|---|
+| **L-28** — the orphaned sentence-final word, 8 of 30 | **Deferred by Aymen.** Do not reopen unprompted. `tests/unit/test_l28_orphaned_final_word.py` pins its shape; it asserts behaviour that is *wrong*, on purpose. Do not encode its suspected cause anywhere — that is still a hypothesis. |
+| **Q2 — LLM provider** | OpenAI `gpt-4o-mini`, chosen on available credit. **The EU-residency half is still open** and is a product/legal call, not an engineering one. |
+| **L-33 — search is not ILIKE** | Deliberate. §6 says "ILIKE for now"; `ILIKE` is accent-sensitive and this is a French-first product. Matching is accent-insensitive, in Python, meeting-scoped. |
+| **Phases A/B/C** | The sequencing above. Four participants are postponed, not dropped. |
+
+### What is verified, and where
+
+`PROJECT_STATE.md` §0 carries the vocabulary. The short version:
+
+- ✅ **M1 + MLX** — the Slice 4 transcription run, `/readyz` against real weights,
+  and the manual end-to-end meeting.
+- ✅ **fake** — everything the automated suite covers, including
+  `MeasuredRecognizer`, which replays *real* MLX emission timing (p50 320 ms,
+  p95 1 280 ms, max 24 s between words) without needing a model.
+- ⚠ — the health banner's failure states; Slice 5's rejection rate and cost.
+- ❌ **needs NVIDIA** — `moshi_server`, `EndOfTurnEvent`, A-3, A-16, the GPU half
+  of A-9.
+- ❌ **needs cross-network** — A-8. Every run so far is loopback.
+
+**Never mark the production GPU serving path verified until it has actually
+served a meeting.** A number measured on MLX does not describe CUDA (A-16).
 
 ---
 
