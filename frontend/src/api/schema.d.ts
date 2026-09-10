@@ -206,6 +206,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/meetings/{meeting_id}/segments/{segment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Correct Segment
+         * @description Correct one segment's text or speaker (Slice 6R item 7, Q9).
+         *
+         *     **Additive.** `text` and `words` are never written here — the correction
+         *     lands in `corrected_text` / `corrected_participant_id` beside them, so what
+         *     the model produced stays recoverable. That is not tidiness: L-28's shape and
+         *     every WER figure in §8 are claims about the model's output, and an
+         *     overwriting edit would make them unfalsifiable with no way to tell an edit
+         *     from a transcription.
+         *
+         *     **Correcting bumps `transcript_version`.** Any outputs already generated
+         *     were derived from the previous one, so the review page can see that they
+         *     describe text that has since changed. It does **not** re-run the summary:
+         *     that is a paid LLM call and Aymen's decision was to mark it for review and
+         *     offer a button, not to spend money on every keystroke.
+         *
+         *     Host-only, like ending a meeting. A guest holding a participant token can
+         *     speak into a transcript but not rewrite it.
+         */
+        patch: operations["correct_segment_meetings__meeting_id__segments__segment_id__patch"];
+        trace?: never;
+    };
+    "/meetings/{meeting_id}/outputs/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate Outputs
+         * @description Re-derive the summary from the corrected transcript.
+         *
+         *     Explicit, never automatic — one button, pressed by a person who has finished
+         *     editing. Correcting five segments should cost one LLM call, not five.
+         *
+         *     The idempotency key carries the transcript version, so pressing this twice
+         *     for the same version enqueues one job, while pressing it after a further
+         *     correction enqueues a new one. The previous outputs row is left alone: it is
+         *     a true record of what was derived from version N, and `GET /outputs` returns
+         *     the newest, so nothing has to be deleted for the right thing to show.
+         */
+        post: operations["regenerate_outputs_meetings__meeting_id__outputs_regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/meetings/{meeting_id}/audio/{session_id}": {
         parameters: {
             query?: never;
@@ -273,6 +338,27 @@ export interface components {
             participant_id: string;
             /** Epoch Ms */
             epoch_ms: number;
+        };
+        /**
+         * CorrectSegmentRequest
+         * @description A human edit to one segment (Slice 6R item 7, Q9).
+         *
+         *     Both fields optional and at least one required: the two errors are
+         *     independent. A misheard word needs `text`; a segment attributed to the wrong
+         *     person needs `participant_id`, and on a single shared microphone that is the
+         *     likelier mistake (L-2).
+         *
+         *     Timestamps are deliberately **not** editable. They are derived from frame
+         *     counts (ADR-11) and are what FR-11's audio seeking arithmetic rests on;
+         *     letting someone type a number there would desynchronise a citation from its
+         *     recording. Named here so the omission reads as a decision rather than an
+         *     oversight.
+         */
+        CorrectSegmentRequest: {
+            /** Text */
+            text?: string | null;
+            /** Participant Id */
+            participant_id?: string | null;
         };
         /** CreateMeetingRequest */
         CreateMeetingRequest: {
@@ -418,6 +504,10 @@ export interface components {
         OutputsResponse: {
             /** Status */
             status: string;
+            /** Generated From Transcript Version */
+            generated_from_transcript_version?: number | null;
+            /** Current Transcript Version */
+            current_transcript_version?: number | null;
             /** Summary */
             summary?: string | null;
             /** Key Points */
@@ -468,7 +558,21 @@ export interface components {
                 number
             ][];
         };
-        /** SegmentView */
+        /**
+         * SegmentView
+         * @description One segment as the review page should show it.
+         *
+         *     **`text` and `participant_id` are the *effective* values** — the correction
+         *     when one exists, the model's output otherwise. That choice is what keeps
+         *     Slice 6R item 7 from breaking the two features built before it: search
+         *     matches what a reader can see, and highlight offsets index into the string
+         *     actually rendered. A client that had to decide which field to display would
+         *     be a client that gets it wrong somewhere.
+         *
+         *     The raw values are not lost, they are just not the default: `original_text`
+         *     and `original_participant_id` are populated **only** when a correction
+         *     exists, so an auditor can always recover what the ASR said (Q9, additive).
+         */
         SegmentView: {
             /** Id */
             id: string;
@@ -486,6 +590,12 @@ export interface components {
             status: string;
             /** Audio Session Id */
             audio_session_id?: string | null;
+            /** Original Text */
+            original_text?: string | null;
+            /** Original Participant Id */
+            original_participant_id?: string | null;
+            /** Corrected At */
+            corrected_at?: string | null;
         };
         /** TranscriptResponse */
         TranscriptResponse: {
@@ -1030,6 +1140,149 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutputsResponse"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not permitted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    correct_segment_meetings__meeting_id__segments__segment_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                meeting_id: string;
+                segment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectSegmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SegmentView"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not permitted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    regenerate_outputs_meetings__meeting_id__outputs_regenerate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

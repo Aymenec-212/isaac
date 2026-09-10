@@ -173,11 +173,34 @@ class TranscriptSegment(Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     start_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
     end_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # What the model said. Slice 6R item 7 never writes to this column again:
+    # a human correction lands in `corrected_text` beside it, so `text` and
+    # `words` stay exactly as the ASR produced them. That is what keeps L-28,
+    # the 1.43% WER and every `[measure]` row falsifiable after the fact — Q9's
+    # "additive only" constraint, enforced by where the data goes rather than by
+    # a convention someone has to remember.
     text: Mapped[str] = mapped_column(Text, nullable=False)
     # Nullable: populated only when the adapter gives word timings for free (R-7).
     words: Mapped[Json | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="final")
     created_at: Mapped[datetime] = created_at_col()
+
+    # --- corrections (Slice 6R item 7, Q9) --------------------------------
+    # All three are NULL until somebody edits the segment. Reading code asks
+    # for the *effective* value (`corrected_x or x`) and the raw one stays
+    # available for anyone auditing what the model actually produced.
+    corrected_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A misattributed segment is as wrong as a misheard word, and on one
+    # microphone it is the likelier error (L-2).
+    corrected_participant_id: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("participants.id", ondelete="SET NULL"), nullable=True
+    )
+    corrected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Who to ask about an edit. Nullable because Slice 7 owns real identity
+    # (Q4); until then this is the host user id from the token.
+    corrected_by: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class MeetingOutputs(Base):

@@ -89,9 +89,9 @@ def find_spans(text: str, query: str) -> tuple[tuple[int, int], ...]:
     return tuple(spans)
 
 
-def search(
-    segments: Sequence[SearchableSegment], query: str
-) -> tuple[list[SearchableSegment], dict[str, SegmentMatch]]:
+def search[SegmentT: SearchableSegment](
+    segments: Sequence[SegmentT], query: str
+) -> tuple[list[SegmentT], dict[str, SegmentMatch]]:
     """Filter a transcript to the segments containing `query`.
 
     Order is preserved: the caller has already sorted for display, and search
@@ -99,12 +99,19 @@ def search(
 
     A blank or too-short query returns everything unfiltered rather than nothing.
     Someone clearing the box wants their transcript back, not an empty page.
+
+    Generic in the segment type, so the caller gets back exactly what it passed
+    in. That matters since Slice 6R item 7: the route searches the *presented*
+    segments, whose `text` already has any correction applied, rather than the
+    database rows. Search a corrected transcript against its raw text and the
+    spans returned index into a string the reader cannot see — the highlight
+    lands on the wrong words, and only in the browser.
     """
     stripped = query.strip()
     if len(stripped) < MIN_QUERY_LENGTH:
         return list(segments), {}
 
-    matched: list[SearchableSegment] = []
+    matched: list[SegmentT] = []
     matches: dict[str, SegmentMatch] = {}
     for segment in segments:
         spans = find_spans(segment.text, stripped)

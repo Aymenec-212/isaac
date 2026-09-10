@@ -764,6 +764,223 @@
         }
       }
     },
+    "/meetings/{meeting_id}/segments/{segment_id}": {
+      "patch": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Correct Segment",
+        "description": "Correct one segment's text or speaker (Slice 6R item 7, Q9).\n\n**Additive.** `text` and `words` are never written here \u2014 the correction\nlands in `corrected_text` / `corrected_participant_id` beside them, so what\nthe model produced stays recoverable. That is not tidiness: L-28's shape and\nevery WER figure in \u00a78 are claims about the model's output, and an\noverwriting edit would make them unfalsifiable with no way to tell an edit\nfrom a transcription.\n\n**Correcting bumps `transcript_version`.** Any outputs already generated\nwere derived from the previous one, so the review page can see that they\ndescribe text that has since changed. It does **not** re-run the summary:\nthat is a paid LLM call and Aymen's decision was to mark it for review and\noffer a button, not to spend money on every keystroke.\n\nHost-only, like ending a meeting. A guest holding a participant token can\nspeak into a transcript but not rewrite it.",
+        "operationId": "correct_segment_meetings__meeting_id__segments__segment_id__patch",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          },
+          {
+            "name": "segment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Segment Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectSegmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SegmentView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Meeting not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/meetings/{meeting_id}/outputs/regenerate": {
+      "post": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Regenerate Outputs",
+        "description": "Re-derive the summary from the corrected transcript.\n\nExplicit, never automatic \u2014 one button, pressed by a person who has finished\nediting. Correcting five segments should cost one LLM call, not five.\n\nThe idempotency key carries the transcript version, so pressing this twice\nfor the same version enqueues one job, while pressing it after a further\ncorrection enqueues a new one. The previous outputs row is left alone: it is\na true record of what was derived from version N, and `GET /outputs` returns\nthe newest, so nothing has to be deleted for the right thing to show.",
+        "operationId": "regenerate_outputs_meetings__meeting_id__outputs_regenerate_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutputsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Meeting not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/meetings/{meeting_id}/audio/{session_id}": {
       "get": {
         "tags": [
@@ -950,6 +1167,37 @@
         ],
         "title": "AudioSessionView",
         "description": "Where one participant's recording sits on the meeting timeline.\n\nThe review page needs `epoch_ms` to turn a segment's meeting-relative\n`start_ms` into an offset inside the file:\n\n    offset_ms = segment.start_ms - session.epoch_ms\n\nSent alongside the segments rather than repeated on each one, because it is\na property of the recording and there are a handful of recordings and\nhundreds of segments."
+      },
+      "CorrectSegmentRequest": {
+        "properties": {
+          "text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "participant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Participant Id"
+          }
+        },
+        "type": "object",
+        "title": "CorrectSegmentRequest",
+        "description": "A human edit to one segment (Slice 6R item 7, Q9).\n\nBoth fields optional and at least one required: the two errors are\nindependent. A misheard word needs `text`; a segment attributed to the wrong\nperson needs `participant_id`, and on a single shared microphone that is the\nlikelier mistake (L-2).\n\nTimestamps are deliberately **not** editable. They are derived from frame\ncounts (ADR-11) and are what FR-11's audio seeking arithmetic rests on;\nletting someone type a number there would desynchronise a citation from its\nrecording. Named here so the omission reads as a decision rather than an\noversight."
       },
       "CreateMeetingRequest": {
         "properties": {
@@ -1346,6 +1594,28 @@
             "type": "string",
             "title": "Status"
           },
+          "generated_from_transcript_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated From Transcript Version"
+          },
+          "current_transcript_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Transcript Version"
+          },
           "summary": {
             "anyOf": [
               {
@@ -1530,6 +1800,40 @@
               }
             ],
             "title": "Audio Session Id"
+          },
+          "original_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Text"
+          },
+          "original_participant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Participant Id"
+          },
+          "corrected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrected At"
           }
         },
         "type": "object",
@@ -1542,7 +1846,8 @@
           "text",
           "status"
         ],
-        "title": "SegmentView"
+        "title": "SegmentView",
+        "description": "One segment as the review page should show it.\n\n**`text` and `participant_id` are the *effective* values** \u2014 the correction\nwhen one exists, the model's output otherwise. That choice is what keeps\nSlice 6R item 7 from breaking the two features built before it: search\nmatches what a reader can see, and highlight offsets index into the string\nactually rendered. A client that had to decide which field to display would\nbe a client that gets it wrong somewhere.\n\nThe raw values are not lost, they are just not the default: `original_text`\nand `original_participant_id` are populated **only** when a correction\nexists, so an auditor can always recover what the ASR said (Q9, additive)."
       },
       "TranscriptResponse": {
         "properties": {
