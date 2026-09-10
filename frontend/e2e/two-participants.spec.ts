@@ -22,7 +22,19 @@ test.use({ launchOptions: chromiumLaunch, permissions: ["microphone"] });
 async function transcriptOn(page: Page): Promise<string[]> {
   return page.locator(".transcript .line-final").evaluateAll((lines) =>
     lines.map((line) => {
-      const speaker = line.querySelector(".speaker")?.textContent?.trim() ?? "";
+      // Two shapes, on purpose (Slice 6R). In the **live view** each line
+      // carries its own `.speaker`, because who is talking changes line to
+      // line. In the **review view** lines are grouped into speaker-turn
+      // paragraphs and the name is said once, in the paragraph's header — a
+      // sibling of this element, not a child. Reading only the child silently
+      // returned an empty speaker on the review page, which is how this helper
+      // failed after grouping landed.
+      const own = line.querySelector(".speaker")?.textContent?.trim();
+      const grouped = line
+        .closest(".para")
+        ?.querySelector(".para-head .speaker")
+        ?.textContent?.trim();
+      const speaker = own || grouped || "";
       const text = (line.textContent ?? "").replace(speaker, "").trim();
       return `${speaker}|${text}`;
     }),

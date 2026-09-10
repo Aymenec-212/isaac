@@ -111,8 +111,8 @@ uv run python -m tools.replay run tools/replay/scenarios/two-participants.json \
 # frontend (from frontend/)
 npm install && npm run dev
 npm run generate:api                          # regenerate typed client
-npm run typecheck && npm test && npm run build   # 79 unit tests
-npm run test:e2e                              # Playwright, 8 specs, needs a running backend
+npm run typecheck && npm test && npm run build   # 91 unit tests
+npm run test:e2e                              # Playwright, 14 specs, needs a running backend
                                               # MOSAIQUE_CHROMIUM_PATH overrides the browser
 ```
 
@@ -144,11 +144,12 @@ to start work without asking anyone a question.*
 
 ### Where the project is
 
-**Slices 0–5 are VERIFIED and merged. Slice 6A (Phase A) is in progress —
-five of its six items are done.**
+**Slices 0–5 are VERIFIED and merged. Slice 6A (Phase A) is five of six done.
+The current slice is 6R — single-user review hardening — items 1–6 built
+2026-09-10; item 7, additive transcript corrections, is the one left.**
 
-**474 tests**: 305 backend unit, 77 backend integration and realtime against real
-PostgreSQL, 79 frontend unit, 8 Playwright browser specs. Plus a 60-minute
+**495 tests**: 305 backend unit, 77 backend integration and realtime against real
+PostgreSQL, 91 frontend unit, 14 Playwright browser specs. Plus a 60-minute
 accelerated run behind `-m slow`. All four suites were run by Aymen on his M1 on
 2026-09-08 and are green — `380 passed, 1 deselected` on the backend, matching
 what this repository produces in CI-less sandboxes exactly. The lifecycle test
@@ -167,6 +168,8 @@ Re-sequenced 2026-09-08. Read `docs/IMPLEMENTATION_PLAN.md` v1.3 before picking
 up work.
 
 - **Phase A — now.** Slice 6A: harden the single-user product on M1 + MLX.
+  **Slice 6R: make the transcript readable** — added 2026-09-09, sequenced ahead
+  of 6A's last item.
 - **Phase B.** Slice 6B: `moshi-server` on a dedicated NVIDIA host, and measure
   the production serving path. Blocked on hardware, not on code.
 - **Phase C.** Slice 6C: four participants, original Slice 6 exit gate intact.
@@ -176,10 +179,20 @@ original item and exit-gate clause into exactly one of 6A/6B/6C.
 
 ### What to do next
 
-**Doable now, no hardware** — one live item is left:
+**Slice 6R item 7 is next — read `docs/IMPLEMENTATION_PLAN.md` v1.4.** Items 1–6
+are built: the transcript now groups into speaker-turn paragraphs
+(`review/paragraphs.ts`), interim text is marked by a word not a colour, and
+failed vs extracted-nothing summaries are distinct states. **Item 7 is additive
+transcript corrections (Q9)** — a correction stored alongside the raw ASR text,
+never overwriting it. The open question inside it, not pre-decided: whether
+correcting a cited segment should invalidate or re-run the intelligence quoting
+it.
+
+**Then, and only then:**
 
 1. **The remaining §15 metrics**, with a stated reason each. The spec lists them;
-   `/livez`, `/readyz`, `/health/deps` already exist.
+   `/livez`, `/readyz`, `/health/deps` already exist. Deliberately sequenced
+   *after* 6R.
 2. ~~**Degraded-state UX.**~~ **Done 2026-09-09** — `frontend/e2e/degraded.spec.ts`
    (6 specs). It found a real bug on the way (L-35), which is what the item was
    for. The **join** path still has the same shape and is deliberately not
@@ -201,6 +214,7 @@ report it already writes; only the last needs duration.
 |---|---|
 | **L-28** — the orphaned sentence-final word, 8 of 30 | **Deferred by Aymen.** Do not reopen unprompted. `tests/unit/test_l28_orphaned_final_word.py` pins its shape; it asserts behaviour that is *wrong*, on purpose. Do not encode its suspected cause anywhere — that is still a hypothesis. |
 | **Q2 — LLM provider** | OpenAI `gpt-4o-mini`, chosen on available credit. **The EU-residency half is still open** and is a product/legal call, not an engineering one. |
+| **Q9 — transcript corrections** | **In scope as of 2026-09-09** (Aymen), reversing the standing "out of scope" default. **Additive only:** raw ASR text and word timings are never overwritten, or L-28, the WER and every `[measure]` row become unfalsifiable. Slice 6R item 7. |
 | **L-33 — search is not ILIKE** | Deliberate. §6 says "ILIKE for now"; `ILIKE` is accent-sensitive and this is a French-first product. Matching is accent-insensitive, in Python, meeting-scoped. |
 | **Phases A/B/C** | The sequencing above. Four participants are postponed, not dropped. |
 

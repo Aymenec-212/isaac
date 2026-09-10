@@ -9,6 +9,7 @@ import {
   type EvidenceTarget,
 } from "./evidence";
 import { resultSummary, splitOnMatches } from "./highlight";
+import { groupIntoParagraphs } from "./paragraphs";
 
 /** Post-meeting review. Outputs are derived data; the transcript is authoritative. */
 export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: () => void }) {
@@ -26,7 +27,7 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
   // constructing it on mount would leave it permanently suspended.
   const contextRef = useRef<AudioContext | null>(null);
   const playersRef = useRef<Map<string, SessionPlayer>>(new Map());
-  const segmentRefs = useRef<Map<string, HTMLParagraphElement>>(new Map());
+  const segmentRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   useEffect(() => {
     void api.transcript(meetingId).then(setTranscript);
@@ -135,6 +136,11 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
 
   const decisions = outputs?.decisions ?? [];
   const actions = outputs?.action_items ?? [];
+  // Succeeded, but with nothing extracted. Distinct from "failed" and from
+  // "still running", and previously indistinguishable from either: the page
+  // simply rendered a summary with no headings under it.
+  const thinOutputs =
+    outputs?.status === "succeeded" && decisions.length === 0 && actions.length === 0;
   const unplayable = useMemo(() => unplayableCitations(outputs, index), [outputs, index]);
 
   // While a search is active the transcript shows the server's filtered list;
@@ -153,6 +159,11 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
     return map;
   }, [results]);
   const spansFor = (segmentId: string) => spansBySegment.get(segmentId);
+
+  // Slice 6R: read as paragraphs, not as one line per model event. Applied to
+  // the filtered list too, and that needs no special case — search hits are far
+  // apart in time, so the pause rule already gives each its own block.
+  const paragraphs = useMemo(() => groupIntoParagraphs(shownSegments), [shownSegments]);
 
   const evidence = (ids: string[]) => {
     const targets = resolveAll(ids, index);
@@ -204,10 +215,26 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
         </div>
       ) : outputs.status === "failed" ? (
         <div className="notice" role="alert">
-          Le compte rendu n'a pas pu être généré. Le transcript reste disponible.
+          <strong>Le compte rendu n'a pas pu être généré.</strong>
+          <div>
+            Le transcript ci-dessous est complet et enregistré : c'est la seule
+            partie qui fait foi. Seul le résumé automatique manque.
+          </div>
+          {outputs.error_code && <code>Référence : {outputs.error_code}</code>}
         </div>
       ) : (
         <section className="outputs">
+          {thinOutputs && (
+            <div className="notice" role="status">
+              <strong>Compte rendu partiel.</strong>
+              <div>
+                Le modèle n'a extrait ni décision ni action de cette réunion. Cela
+                arrive sur une réunion courte ou peu structurée — le résumé et le
+                transcript restent utilisables.
+              </div>
+            </div>
+          )}
+
           <h3>Résumé</h3>
           <p>{outputs.summary}</p>
 
@@ -263,24 +290,41 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
       </div>
 
       <div className="transcript">
-        {shownSegments.map((segment) => (
-          <p
-            key={segment.id}
-            ref={(node) => {
-              if (node) segmentRefs.current.set(segment.id, node);
-              else segmentRefs.current.delete(segment.id);
-            }}
-            className={`line line-final${active === segment.id ? " line-cited" : ""}`}
-          >
-            <span className="speaker">{index.speakerFor(segment.participant_id)}</span>
-            {splitOnMatches(segment.text, spansFor(segment.id)).map((part, i) =>
-              part.match ? (
-                <mark key={i}>{part.text}</mark>
-              ) : (
-                <span key={i}>{part.text}</span>
-              ),
-            )}
-          </p>
+        {paragraphs.map((paragraph) => (
+          <article key={paragraph.key} className="para">
+            {/* Said once per paragraph rather than once per segment. That single
+                change is most of what turns ~930 labelled lines into a readable
+                hour. */}
+            <header className="para-head">
+              <span className="speaker">{index.speakerFor(paragraph.participantId)}</span>
+              <span className="para-time">{formatTimestamp(paragraph.startMs)}</span>
+            </header>
+            <p className="para-body line-final">
+              {paragraph.segments.map((segment) => (
+                // One element per segment, still. Grouping changes how the
+                // transcript looks and never what is addressable: a citation
+                // scrolls to this node and a highlight indexes into this
+                // segment's own text at the server's offsets.
+                <span
+                  key={segment.id}
+                  data-segment-id={segment.id}
+                  ref={(node) => {
+                    if (node) segmentRefs.current.set(segment.id, node);
+                    else segmentRefs.current.delete(segment.id);
+                  }}
+                  className={`seg${active === segment.id ? " seg-cited" : ""}`}
+                >
+                  {splitOnMatches(segment.text, spansFor(segment.id)).map((part, i) =>
+                    part.match ? (
+                      <mark key={i}>{part.text}</mark>
+                    ) : (
+                      <span key={i}>{part.text}</span>
+                    ),
+                  )}{" "}
+                </span>
+              ))}
+            </p>
+          </article>
         ))}
       </div>
     </>
