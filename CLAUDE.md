@@ -111,8 +111,8 @@ uv run python -m tools.replay run tools/replay/scenarios/two-participants.json \
 # frontend (from frontend/)
 npm install && npm run dev
 npm run generate:api                          # regenerate typed client
-npm run typecheck && npm test && npm run build   # 79 unit tests
-npm run test:e2e                              # Playwright, 8 specs, needs a running backend
+npm run typecheck && npm test && npm run build   # 91 unit tests
+npm run test:e2e                              # Playwright, 14 specs, needs a running backend
                                               # MOSAIQUE_CHROMIUM_PATH overrides the browser
 ```
 
@@ -145,11 +145,11 @@ to start work without asking anyone a question.*
 ### Where the project is
 
 **Slices 0–5 are VERIFIED and merged. Slice 6A (Phase A) is five of six done.
-The current slice is 6R — single-user review hardening — specified 2026-09-09 and
-not yet built.**
+The current slice is 6R — single-user review hardening — items 1–6 built
+2026-09-10; item 7, additive transcript corrections, is the one left.**
 
-**474 tests**: 305 backend unit, 77 backend integration and realtime against real
-PostgreSQL, 79 frontend unit, 8 Playwright browser specs. Plus a 60-minute
+**495 tests**: 305 backend unit, 77 backend integration and realtime against real
+PostgreSQL, 91 frontend unit, 14 Playwright browser specs. Plus a 60-minute
 accelerated run behind `-m slow`. All four suites were run by Aymen on his M1 on
 2026-09-08 and are green — `380 passed, 1 deselected` on the backend, matching
 what this repository produces in CI-less sandboxes exactly. The lifecycle test
@@ -179,13 +179,14 @@ original item and exit-gate clause into exactly one of 6A/6B/6C.
 
 ### What to do next
 
-**Slice 6R first — read `docs/IMPLEMENTATION_PLAN.md` v1.4 before starting it.**
-The transcript is presented as one paragraph per segment with the speaker
-repeated on each; an hour of French is ~930 labelled lines. The principle is
-Aymen's: *preserve the raw segment/word evidence internally, present a
-human-readable transcript by default.* Two of its eight items — clickable
-citations and search highlighting — **already work and are regression
-constraints**, because paragraph grouping is exactly what breaks them.
+**Slice 6R item 7 is next — read `docs/IMPLEMENTATION_PLAN.md` v1.4.** Items 1–6
+are built: the transcript now groups into speaker-turn paragraphs
+(`review/paragraphs.ts`), interim text is marked by a word not a colour, and
+failed vs extracted-nothing summaries are distinct states. **Item 7 is additive
+transcript corrections (Q9)** — a correction stored alongside the raw ASR text,
+never overwriting it. The open question inside it, not pre-decided: whether
+correcting a cited segment should invalidate or re-run the intelligence quoting
+it.
 
 **Then, and only then:**
 

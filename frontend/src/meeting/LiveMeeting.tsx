@@ -194,6 +194,16 @@ export function LiveMeeting({
           {entries.map((entry) => (
             <p key={entry.key} className={`line line-${entry.status}`}>
               <span className="speaker">{roster.current.nameFor(entry.participantId)}</span>
+              {/* Slice 6R item 2. Interim text used to be marked by italics and a
+                  grey border alone — invisible to anyone who cannot separate the
+                  two colours, and easy to miss for everyone else. The word says
+                  what the styling implies, so the distinction no longer depends
+                  on seeing a hue. */}
+              {entry.status === "interim" && (
+                <span className="tag-interim" aria-label="transcription en cours">
+                  en cours
+                </span>
+              )}
               {entry.text}
             </p>
           ))}

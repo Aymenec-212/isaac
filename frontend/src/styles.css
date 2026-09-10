@@ -502,6 +502,61 @@ input[type="text"] {
   font-size: 0.9em;
 }
 
+/* --- Slice 6R: a transcript that reads like minutes ---------------------- */
+
+/* One block per speaker-turn, not per segment. The speaker's name and the
+   timestamp are said once here instead of on every one of ~930 lines. */
+.para {
+  margin: 0 0 18px;
+  padding-left: 12px;
+  border-left: 2px solid var(--azure);
+}
+
+.para-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+
+.para-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.para-body {
+  margin: 0;
+  line-height: 1.65;
+}
+
+/* Segments stay individually addressable inside the paragraph — this is what
+   citations scroll to and what search highlights index into. Normally it is
+   invisible; it only shows itself when cited. */
+.seg {
+  transition: background-color 180ms ease;
+}
+
+.seg-cited {
+  background: rgba(120, 160, 255, 0.28);
+  border-radius: 3px;
+}
+
+/* Interim text carries a word, not only a colour and an italic. Someone who
+   cannot separate the two hues still sees which text is provisional. */
+.tag-interim {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
+  vertical-align: 1px;
+}
+
 /* --- Slice 6A: dependency health banner (tech spec 15) ------------------ */
 
 .health-banner {
