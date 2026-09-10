@@ -72,6 +72,20 @@ class JoinResponse(BaseModel):
 
 
 class SegmentView(BaseModel):
+    """One segment as the review page should show it.
+
+    **`text` and `participant_id` are the *effective* values** — the correction
+    when one exists, the model's output otherwise. That choice is what keeps
+    Slice 6R item 7 from breaking the two features built before it: search
+    matches what a reader can see, and highlight offsets index into the string
+    actually rendered. A client that had to decide which field to display would
+    be a client that gets it wrong somewhere.
+
+    The raw values are not lost, they are just not the default: `original_text`
+    and `original_participant_id` are populated **only** when a correction
+    exists, so an auditor can always recover what the ASR said (Q9, additive).
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -84,6 +98,11 @@ class SegmentView(BaseModel):
     # Which stored recording this segment came from (FR-11). Nullable because a
     # gap segment (L-20) describes audio that was never received.
     audio_session_id: str | None = None
+    # Null unless this segment was corrected. Their presence *is* the "edited"
+    # flag; a separate boolean could disagree with them.
+    original_text: str | None = None
+    original_participant_id: str | None = None
+    corrected_at: datetime | None = None
 
 
 class AudioSessionView(BaseModel):
@@ -145,10 +164,35 @@ class ActionItemView(EvidenceItem):
     due_text: str | None = None
 
 
+class CorrectSegmentRequest(BaseModel):
+    """A human edit to one segment (Slice 6R item 7, Q9).
+
+    Both fields optional and at least one required: the two errors are
+    independent. A misheard word needs `text`; a segment attributed to the wrong
+    person needs `participant_id`, and on a single shared microphone that is the
+    likelier mistake (L-2).
+
+    Timestamps are deliberately **not** editable. They are derived from frame
+    counts (ADR-11) and are what FR-11's audio seeking arithmetic rests on;
+    letting someone type a number there would desynchronise a citation from its
+    recording. Named here so the omission reads as a decision rather than an
+    oversight.
+    """
+
+    text: str | None = Field(default=None, min_length=1, max_length=4000)
+    participant_id: str | None = None
+
+
 class OutputsResponse(BaseModel):
     """202 while the job is pending; the body's `status` says which (X-12)."""
 
     status: str  # pending | running | failed | succeeded
+    # Which transcript these outputs were derived from, and which one the
+    # meeting is on now. When they differ the transcript has been corrected
+    # since — the review page says "à revoir" and offers to regenerate rather
+    # than silently showing a summary of text nobody can see any more.
+    generated_from_transcript_version: int | None = None
+    current_transcript_version: int | None = None
     summary: str | None = None
     key_points: list[str] = Field(default_factory=list)
     decisions: list[EvidenceItem] = Field(default_factory=list)

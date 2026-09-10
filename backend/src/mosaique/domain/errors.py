@@ -24,6 +24,11 @@ class ErrorCode(StrEnum):
     ASR_TIMEOUT = "ASR_TIMEOUT"
     PERSISTENCE_UNAVAILABLE = "PERSISTENCE_UNAVAILABLE"
     POSTPROCESSING_FAILED = "POSTPROCESSING_FAILED"
+    # Slice 6R item 7. A correction that changes nothing, or names a speaker who
+    # was never in the room, is a client mistake rather than a state conflict —
+    # and reusing AUDIO_INVALID_FRAME for a text edit would make the taxonomy
+    # lie. Extends §6's list rather than deviating from it.
+    VALIDATION_FAILED = "VALIDATION_FAILED"
     RATE_LIMITED = "RATE_LIMITED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
@@ -42,6 +47,7 @@ STATUS_FOR_CODE: dict[ErrorCode, int] = {
     ErrorCode.ASR_TIMEOUT: HTTPStatus.GATEWAY_TIMEOUT,
     ErrorCode.PERSISTENCE_UNAVAILABLE: HTTPStatus.SERVICE_UNAVAILABLE,
     ErrorCode.POSTPROCESSING_FAILED: HTTPStatus.INTERNAL_SERVER_ERROR,
+    ErrorCode.VALIDATION_FAILED: HTTPStatus.BAD_REQUEST,
     ErrorCode.RATE_LIMITED: HTTPStatus.TOO_MANY_REQUESTS,
     ErrorCode.INTERNAL_ERROR: HTTPStatus.INTERNAL_SERVER_ERROR,
 }

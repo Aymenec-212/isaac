@@ -44,12 +44,20 @@ BUDGET_TOKENS = CONTEXT_WINDOW_TOKENS // 2
 
 @dataclass(frozen=True)
 class Segment:
-    """The three fields `build_user_prompt` reads."""
+    """The fields `build_user_prompt` reads.
+
+    The two correction columns are here because a real segment row has them
+    (migration 0002) and the prompt reads the *effective* values. A double that
+    omits them is a double that no longer matches what the code will be handed
+    — which is how this test broke when Slice 6R item 7 landed, and rightly so.
+    """
 
     id: str
     participant_id: str
     start_ms: int
     text: str
+    corrected_text: str | None = None
+    corrected_participant_id: str | None = None
 
 
 def _hour_of_segments() -> list[Segment]:

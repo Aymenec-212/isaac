@@ -186,6 +186,20 @@ class SegmentRepository:
         )
         return (await self._session.execute(stmt)).scalars().all()
 
+    async def get_for_meeting(self, meeting_id: str, segment_id: str) -> TranscriptSegment | None:
+        """One segment, scoped to its meeting *and* its tenant.
+
+        Both checks, not one: a valid segment id from another meeting in the
+        same organization must not be editable through another meeting's URL —
+        the same belt-and-braces the audio route uses.
+        """
+        stmt = select(TranscriptSegment).where(
+            TranscriptSegment.id == segment_id,
+            TranscriptSegment.meeting_id == meeting_id,
+            TranscriptSegment.organization_id == self._organization_id,
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
     async def next_sequence(self, participant_id: str) -> int:
         """Restored from the database on restart, per tech spec 10."""
         stmt = select(func.max(TranscriptSegment.sequence)).where(

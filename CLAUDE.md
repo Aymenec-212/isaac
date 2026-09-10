@@ -97,7 +97,7 @@ uv venv && uv pip install -e ".[dev]"
 uv run alembic upgrade head
 uv run python -m mosaique.app.seed            # prints a host token
 uv run uvicorn mosaique.app.main:create_app --factory --reload --port 8000
-uv run pytest -q                              # 382, 1 deselected
+uv run pytest -q                              # 398, 1 deselected
 uv run pytest -q -m "not integration"         # 305, no database needed
 uv run pytest -q -m slow                      # the accelerated hour, ~70 s
 uv run ruff check . && uv run ruff format .
@@ -112,7 +112,7 @@ uv run python -m tools.replay run tools/replay/scenarios/two-participants.json \
 npm install && npm run dev
 npm run generate:api                          # regenerate typed client
 npm run typecheck && npm test && npm run build   # 91 unit tests
-npm run test:e2e                              # Playwright, 14 specs, needs a running backend
+npm run test:e2e                              # Playwright, 19 specs, needs a running backend
                                               # MOSAIQUE_CHROMIUM_PATH overrides the browser
 ```
 
@@ -144,12 +144,12 @@ to start work without asking anyone a question.*
 
 ### Where the project is
 
-**Slices 0–5 are VERIFIED and merged. Slice 6A (Phase A) is five of six done.
-The current slice is 6R — single-user review hardening — items 1–6 built
-2026-09-10; item 7, additive transcript corrections, is the one left.**
+**Slices 0–5 are VERIFIED and merged. Slice 6R is COMPLETE (2026-09-10).
+Slice 6A is five of six done — its last item, the remaining §15 metrics, is the
+only thing left in Phase A.**
 
-**495 tests**: 305 backend unit, 77 backend integration and realtime against real
-PostgreSQL, 91 frontend unit, 14 Playwright browser specs. Plus a 60-minute
+**516 tests**: 305 backend unit, 93 backend integration and realtime against real
+PostgreSQL, 91 frontend unit, 19 Playwright browser specs. Plus a 60-minute
 accelerated run behind `-m slow`. All four suites were run by Aymen on his M1 on
 2026-09-08 and are green — `380 passed, 1 deselected` on the backend, matching
 what this repository produces in CI-less sandboxes exactly. The lifecycle test
@@ -179,20 +179,19 @@ original item and exit-gate clause into exactly one of 6A/6B/6C.
 
 ### What to do next
 
-**Slice 6R item 7 is next — read `docs/IMPLEMENTATION_PLAN.md` v1.4.** Items 1–6
-are built: the transcript now groups into speaker-turn paragraphs
-(`review/paragraphs.ts`), interim text is marked by a word not a colour, and
-failed vs extracted-nothing summaries are distinct states. **Item 7 is additive
-transcript corrections (Q9)** — a correction stored alongside the raw ASR text,
-never overwriting it. The open question inside it, not pre-decided: whether
-correcting a cited segment should invalidate or re-run the intelligence quoting
-it.
+**Slice 6R is done.** The transcript groups into speaker-turn paragraphs
+(`review/paragraphs.ts`), interim text is marked by a word not a colour, failed
+vs extracted-nothing summaries are distinct states, and segments can be
+corrected — **additively**: `text` and `words` are never overwritten, a
+correction lands beside them (migration `0002`), and every reader goes through
+`transcript/corrections.py`, which is the single definition of what a segment
+says. Correcting bumps `transcript_version`; the review page then says *à revoir*
+and offers one button. Regeneration is **never** automatic.
 
-**Then, and only then:**
+**One item is left in Phase A:**
 
 1. **The remaining §15 metrics**, with a stated reason each. The spec lists them;
-   `/livez`, `/readyz`, `/health/deps` already exist. Deliberately sequenced
-   *after* 6R.
+   `/livez`, `/readyz`, `/health/deps` already exist.
 2. ~~**Degraded-state UX.**~~ **Done 2026-09-09** — `frontend/e2e/degraded.spec.ts`
    (6 specs). It found a real bug on the way (L-35), which is what the item was
    for. The **join** path still has the same shape and is deliberately not
@@ -214,7 +213,7 @@ report it already writes; only the last needs duration.
 |---|---|
 | **L-28** — the orphaned sentence-final word, 8 of 30 | **Deferred by Aymen.** Do not reopen unprompted. `tests/unit/test_l28_orphaned_final_word.py` pins its shape; it asserts behaviour that is *wrong*, on purpose. Do not encode its suspected cause anywhere — that is still a hypothesis. |
 | **Q2 — LLM provider** | OpenAI `gpt-4o-mini`, chosen on available credit. **The EU-residency half is still open** and is a product/legal call, not an engineering one. |
-| **Q9 — transcript corrections** | **In scope as of 2026-09-09** (Aymen), reversing the standing "out of scope" default. **Additive only:** raw ASR text and word timings are never overwritten, or L-28, the WER and every `[measure]` row become unfalsifiable. Slice 6R item 7. |
+| **Q9 — transcript corrections** | **In scope, and built 2026-09-10.** **Additive only:** raw ASR text and word timings are never overwritten, or L-28, the WER and every `[measure]` row become unfalsifiable. Correcting marks the summary *à revoir* and offers a button — it never re-runs the LLM by itself. No correction history (L-39) and no timestamp correction (L-40), both deliberate. |
 | **L-33 — search is not ILIKE** | Deliberate. §6 says "ILIKE for now"; `ILIKE` is accent-sensitive and this is a French-first product. Matching is accent-insensitive, in Python, meeting-scoped. |
 | **Phases A/B/C** | The sequencing above. Four participants are postponed, not dropped. |
 
@@ -239,7 +238,7 @@ served a meeting.** A number measured on MLX does not describe CUDA (A-16).
 
 ## Known traps
 
-Six mistakes this codebase has actually made. Each cost real debugging time
+Seven lessons this codebase has actually paid for. Six are mistakes it made; the first is the one it avoided by applying the sixth in advance. Each cost real debugging time
 and each is easy to repeat.
 
 **Stream time is not wall time.** Silence and segment boundaries are judged in
@@ -261,6 +260,15 @@ rules with a leading slash, and check `git check-ignore -v` when a file vanishes
 30 s of silence (§7.4), and it is right to. The harness generated an hour of
 synthetic audio *after* connecting and looked exactly like a dead client;
 generate first, connect second, and yield inside any tight send loop.
+
+**One fact, one definition — or the copies drift.** "What this segment says"
+has three readers: the review page, `?q=` search, and the summarizer's prompt.
+Corrections (Q9) made the answer stop being `segment.text`, and each reader
+computing it for itself would mean a correction visible on screen and absent
+from the summary. It lives once, in `transcript/corrections.py`, in
+`transcript/` rather than beside the API because `jobs/` and `intelligence/` may
+not import a transport (D-04). The same instinct as the trap below, applied
+before the bug rather than after it.
 
 **A tested value with no consumer is not a tested feature.** `bannerFor`
 computed `canStartMeeting`, `status.test.ts` asserted it six times, and nothing

@@ -108,6 +108,26 @@ export const api = {
   outputs: (meetingId: string) => request<OutputsResponse>(`/meetings/${meetingId}/outputs`),
 
   /**
+   * Correct one segment's text or speaker (Slice 6R item 7, Q9).
+   *
+   * Additive on the server: what the model said is kept, the correction is
+   * stored beside it. The response is the segment as it should now be shown.
+   */
+  correctSegment: (
+    meetingId: string,
+    segmentId: string,
+    body: { text?: string; participant_id?: string },
+  ) =>
+    request<TranscriptResponse["segments"][number]>(
+      `/meetings/${meetingId}/segments/${segmentId}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+
+  /** Re-derive the summary from the corrected transcript. Explicit, never automatic. */
+  regenerateOutputs: (meetingId: string) =>
+    request<OutputsResponse>(`/meetings/${meetingId}/outputs/regenerate`, { method: "POST" }),
+
+  /**
    * Stored PCM for one audio session (FR-11).
    *
    * Not routed through `request`: the body is raw bytes, not JSON, and the

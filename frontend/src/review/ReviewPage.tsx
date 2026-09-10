@@ -22,6 +22,16 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
   const [queryInput, setQueryInput] = useState("");
   const [results, setResults] = useState<TranscriptResponse | null>(null);
 
+  // Slice 6R item 7. Which segment is open for editing, and what is in the box.
+  // Deliberately one at a time: a transcript full of open editors is a form,
+  // not a document.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [draftSpeaker, setDraftSpeaker] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+
   // One AudioContext for the page, one player per audio session. Created
   // lazily: browsers refuse to start a context before a user gesture, so
   // constructing it on mount would leave it permanently suspended.
@@ -91,6 +101,90 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
   }, []);
 
   const index = useMemo(() => indexTranscript(transcript), [transcript]);
+
+  const openEditor = useCallback(
+    (segment: TranscriptResponse["segments"][number]) => {
+      setEditing(segment.id);
+      setDraft(segment.text);
+      setDraftSpeaker(segment.participant_id);
+      setEditError(null);
+    },
+    [],
+  );
+
+  const saveCorrection = useCallback(
+    async (segmentId: string, originalText: string, originalSpeaker: string) => {
+      const text = draft.trim();
+      const body: { text?: string; participant_id?: string } = {};
+      if (text && text !== originalText) body.text = text;
+      if (draftSpeaker && draftSpeaker !== originalSpeaker) body.participant_id = draftSpeaker;
+      // Nothing actually changed: closing is the honest outcome, and it saves a
+      // round trip the server would reject anyway.
+      if (!body.text && !body.participant_id) {
+        setEditing(null);
+        return;
+      }
+
+      setSaving(true);
+      setEditError(null);
+      try {
+        await api.correctSegment(meetingId, segmentId, body);
+        // Re-fetch rather than patching state in place: the correction also
+        // moved the meeting's transcript version, and the outputs banner reads
+        // that. Two sources of truth here is how they drift.
+        const [nextTranscript, nextOutputs] = await Promise.all([
+          api.transcript(meetingId),
+          api.outputs(meetingId).catch(() => null),
+        ]);
+        setTranscript(nextTranscript);
+        if (nextOutputs) setOutputs(nextOutputs);
+        setEditing(null);
+      } catch {
+        setEditError("La correction n'a pas pu être enregistrée.");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [draft, draftSpeaker, meetingId],
+  );
+
+  const regenerate = useCallback(async () => {
+    setRegenerating(true);
+    try {
+      await api.regenerateOutputs(meetingId);
+      // The job is queued, not done — but unlike the first summary, a succeeded
+      // one is already sitting there. Polling on `status` alone therefore
+      // returns instantly with the *stale* outputs and calls it finished; the
+      // browser test caught exactly that. The condition that means "caught up"
+      // is the version handshake, not the status.
+      const poll = async (attempt = 0): Promise<void> => {
+        const next = await api.outputs(meetingId);
+        setOutputs(next);
+        const caughtUp =
+          next.generated_from_transcript_version != null &&
+          next.current_transcript_version != null &&
+          next.generated_from_transcript_version >= next.current_transcript_version;
+        // Give up quietly after ~30 s: the banner still says the summary needs
+        // review, which is true, and the button can be pressed again.
+        if (caughtUp || next.status === "failed" || attempt >= 15) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        return poll(attempt + 1);
+      };
+      await poll();
+    } catch {
+      setEditError("La régénération n'a pas pu être lancée.");
+    } finally {
+      setRegenerating(false);
+    }
+  }, [meetingId]);
+
+  // The two numbers the server hands back. Different means the transcript has
+  // been corrected since these insights were derived from it.
+  const outputsStale =
+    outputs?.status === "succeeded" &&
+    outputs.generated_from_transcript_version != null &&
+    outputs.current_transcript_version != null &&
+    outputs.generated_from_transcript_version < outputs.current_transcript_version;
 
   const play = useCallback(
     async (target: EvidenceTarget) => {
@@ -224,6 +318,29 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
         </div>
       ) : (
         <section className="outputs">
+          {/* Item 7's provenance line. Always shown, so "generated from v1" is
+              ordinary rather than an alarm — and when the transcript has moved
+              on, the same line is what says so. */}
+          <div className={`outputs-provenance${outputsStale ? " outputs-stale" : ""}`} role="status">
+            <span>
+              Compte rendu généré à partir du transcript v
+              {outputs.generated_from_transcript_version ?? 1}
+            </span>
+            {outputsStale && (
+              <>
+                <strong>Le transcript a été corrigé — le compte rendu est à revoir.</strong>
+                <button
+                  type="button"
+                  className="btn-quiet"
+                  onClick={() => void regenerate()}
+                  disabled={regenerating}
+                >
+                  {regenerating ? "Régénération…" : "Régénérer le compte rendu"}
+                </button>
+              </>
+            )}
+          </div>
+
           {thinOutputs && (
             <div className="notice" role="status">
               <strong>Compte rendu partiel.</strong>
@@ -299,6 +416,64 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
               <span className="speaker">{index.speakerFor(paragraph.participantId)}</span>
               <span className="para-time">{formatTimestamp(paragraph.startMs)}</span>
             </header>
+            {/* The editor replaces nothing: it sits under the paragraph that
+                holds the segment, so the surrounding words stay readable while
+                someone fixes one of them. */}
+            {paragraph.segments.some((segment) => segment.id === editing) && (
+              <div className="seg-editor">
+                <label>
+                  Texte
+                  <textarea
+                    value={draft}
+                    rows={2}
+                    aria-label="Texte du segment"
+                    onChange={(event) => setDraft(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Intervenant
+                  <select
+                    value={draftSpeaker}
+                    aria-label="Intervenant du segment"
+                    onChange={(event) => setDraftSpeaker(event.target.value)}
+                  >
+                    {(transcript?.participants ?? []).map((participant) => (
+                      <option key={participant.id} value={participant.id}>
+                        {participant.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="seg-editor-actions">
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={saving}
+                    onClick={() => {
+                      const segment = paragraph.segments.find((x) => x.id === editing);
+                      if (segment) {
+                        void saveCorrection(segment.id, segment.text, segment.participant_id);
+                      }
+                    }}
+                  >
+                    {saving ? "Enregistrement…" : "Enregistrer"}
+                  </button>
+                  <button type="button" className="btn-quiet" onClick={() => setEditing(null)}>
+                    Annuler
+                  </button>
+                </div>
+                {editError && (
+                  <p className="field-note" role="alert">
+                    {editError}
+                  </p>
+                )}
+                <p className="muted">
+                  La transcription d'origine est conservée : une correction ne
+                  l'efface pas.
+                </p>
+              </div>
+            )}
+
             <p className="para-body line-final">
               {paragraph.segments.map((segment) => (
                 // One element per segment, still. Grouping changes how the
@@ -312,7 +487,18 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
                     if (node) segmentRefs.current.set(segment.id, node);
                     else segmentRefs.current.delete(segment.id);
                   }}
-                  className={`seg${active === segment.id ? " seg-cited" : ""}`}
+                  className={
+                    `seg${active === segment.id ? " seg-cited" : ""}` +
+                    (segment.original_text || segment.original_participant_id
+                      ? " seg-corrected"
+                      : "")
+                  }
+                  title={
+                    segment.original_text
+                      ? `Texte d'origine : ${segment.original_text}`
+                      : undefined
+                  }
+                  onDoubleClick={() => openEditor(segment)}
                 >
                   {splitOnMatches(segment.text, spansFor(segment.id)).map((part, i) =>
                     part.match ? (
@@ -320,7 +506,17 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
                     ) : (
                       <span key={i}>{part.text}</span>
                     ),
-                  )}{" "}
+                  )}
+                  {/* Small, always present rather than on hover: a control that
+                      only exists on hover cannot be found by keyboard or touch. */}
+                  <button
+                    type="button"
+                    className="seg-edit"
+                    aria-label={`Corriger : ${segment.text.slice(0, 40)}`}
+                    onClick={() => openEditor(segment)}
+                  >
+                    ✎
+                  </button>{" "}
                 </span>
               ))}
             </p>

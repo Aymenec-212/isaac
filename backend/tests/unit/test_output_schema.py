@@ -68,6 +68,10 @@ def test_prompt_marks_transcript_as_data_and_exposes_segment_ids():
     class Seg:
         def __init__(self, sid, pid, start, text):
             self.id, self.participant_id, self.start_ms, self.text = sid, pid, start, text
+            # A real row carries these (migration 0002) and the prompt reads the
+            # effective values through them; an uncorrected segment has both None.
+            self.corrected_text = None
+            self.corrected_participant_id = None
 
     prompt = build_user_prompt([Seg("seg-1", "p1", 65_000, "Bonjour.")], {"p1": "Amina"})
     assert "<transcript>" in prompt and "</transcript>" in prompt

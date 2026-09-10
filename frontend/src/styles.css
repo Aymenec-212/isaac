@@ -557,6 +557,102 @@ input[type="text"] {
   vertical-align: 1px;
 }
 
+/* --- Slice 6R item 7: corrections (Q9) ---------------------------------- */
+
+/* Where the insights came from. Ordinary and quiet when the transcript has not
+   moved; the same line carries the warning when it has. */
+.outputs-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.outputs-stale {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 3px solid #8a5a00;
+  background: rgba(138, 90, 0, 0.09);
+  color: #8a5a00;
+}
+
+@media (prefers-color-scheme: dark) {
+  .outputs-stale {
+    color: #f0c26b;
+    background: rgba(240, 194, 107, 0.1);
+  }
+}
+
+/* A corrected segment is marked, not hidden: the reader should be able to tell
+   a human edit from the model's own words at a glance, and hover for what was
+   there before. */
+.seg-corrected {
+  border-bottom: 1px dotted currentColor;
+}
+
+.seg-edit {
+  border: none;
+  background: none;
+  padding: 0 3px;
+  margin-left: 2px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--ink-soft);
+  opacity: 0.45;
+}
+
+.seg-edit:hover,
+.seg-edit:focus-visible {
+  opacity: 1;
+  color: var(--azure);
+}
+
+.seg-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: flex-end;
+  margin: 8px 0 10px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.08);
+}
+
+.seg-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  flex: 1 1 240px;
+}
+
+.seg-editor textarea,
+.seg-editor select {
+  font: inherit;
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: transparent;
+  color: inherit;
+  resize: vertical;
+}
+
+.seg-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.seg-editor .muted {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+}
+
 /* --- Slice 6A: dependency health banner (tech spec 15) ------------------ */
 
 .health-banner {

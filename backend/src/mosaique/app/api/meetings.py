@@ -17,6 +17,7 @@ from mosaique.app.api.ranges import UnsatisfiableRange, parse_range
 from mosaique.app.api.schemas import (
     ActionItemView,
     AudioSessionView,
+    CorrectSegmentRequest,
     CreateMeetingRequest,
     CreateMeetingResponse,
     EndMeetingResponse,
@@ -46,7 +47,7 @@ from mosaique.domain.state import InvalidTransition, MeetingState, end, open_roo
 from mosaique.jobs import JOB_KIND, PROCESSOR_VERSION
 from mosaique.observability.logging import get_logger
 from mosaique.observability.metrics import METRICS
-from mosaique.persistence.models import AudioSession, Meeting
+from mosaique.persistence.models import AudioSession, Meeting, TranscriptSegment
 from mosaique.persistence.repositories.meetings import MeetingRepository
 from mosaique.persistence.repositories.transcript import (
     AudioSessionRepository,
@@ -57,6 +58,11 @@ from mosaique.persistence.repositories.transcript import (
 )
 from mosaique.realtime.protocol.messages import MeetingStateMessage
 from mosaique.realtime.runtime_state import get_registry
+from mosaique.transcript.corrections import (
+    effective_participant_id,
+    effective_text,
+    is_corrected,
+)
 from mosaique.transcript.search import search
 
 # Documented on every route so the error envelope is part of the published
@@ -70,6 +76,34 @@ ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
 
 router = APIRouter(prefix="/meetings", tags=["meetings"], responses=ERROR_RESPONSES)
 log = get_logger(__name__)
+
+
+def segment_view(segment: TranscriptSegment) -> SegmentView:
+    """Present a segment with corrections applied, raw values kept beside it.
+
+    One place decides what "the text of this segment" means. Everything that
+    reads a transcript — the review page, `?q=` search, evidence resolution —
+    goes through here, so a correction cannot be visible in one of them and
+    absent from another.
+    """
+    return SegmentView(
+        id=segment.id,
+        participant_id=effective_participant_id(segment),
+        sequence=segment.sequence,
+        start_ms=segment.start_ms,
+        end_ms=segment.end_ms,
+        text=effective_text(segment),
+        status=segment.status,
+        audio_session_id=segment.audio_session_id,
+        # Only populated when there is something to compare against, so their
+        # presence is the "this was edited" signal rather than a second flag
+        # that could drift out of step with them.
+        original_text=segment.text if segment.corrected_text is not None else None,
+        original_participant_id=(
+            segment.participant_id if segment.corrected_participant_id is not None else None
+        ),
+        corrected_at=segment.corrected_at if is_corrected(segment) else None,
+    )
 
 
 @router.post("", response_model=CreateMeetingResponse, status_code=status.HTTP_201_CREATED)
@@ -244,12 +278,15 @@ async def get_transcript(
     audio_sessions = await AudioSessionRepository(
         session, principal.organization_id
     ).list_for_meeting(meeting_id)
-    visible, matches = search(segments, q or "")
+    # Search the *presented* segments, not the database rows: since item 7 a
+    # corrected segment's visible text differs from its stored one, and matching
+    # the stored text would highlight offsets into a string nobody can see.
+    visible, matches = search([segment_view(s) for s in segments], q or "")
     return TranscriptResponse(
         meeting_id=meeting.id,
         transcript_version=meeting.transcript_version,
         participants=[ParticipantView.model_validate(p) for p in participants],
-        segments=[SegmentView.model_validate(s) for s in visible],
+        segments=list(visible),
         audio_sessions=[AudioSessionView.model_validate(a) for a in audio_sessions],
         query=q,
         total_segments=len(segments),
@@ -267,7 +304,7 @@ async def get_outputs(
     if not is_valid_id(meeting_id):
         raise NotFound()
     repo = MeetingRepository(session, principal.organization_id)
-    authorize_meeting_access(principal, await repo.get(meeting_id))
+    meeting = authorize_meeting_access(principal, await repo.get(meeting_id))
 
     outputs = await OutputsRepository(session, principal.organization_id).get(meeting_id)
     if outputs is not None:
@@ -278,13 +315,144 @@ async def get_outputs(
             decisions=[EvidenceItem(**d) for d in (outputs.decisions or [])],
             action_items=[ActionItemView(**a) for a in (outputs.action_items or [])],
             open_questions=[EvidenceItem(**q) for q in (outputs.open_questions or [])],
+            # The two numbers the review page compares to decide whether what it
+            # is showing still describes the transcript underneath it.
+            generated_from_transcript_version=outputs.transcript_version,
+            current_transcript_version=meeting.transcript_version,
         )
 
     job = await JobRepository(session).get_latest_for_meeting(meeting_id)
     if job is not None and job.status == "failed":
-        return OutputsResponse(status="failed", error_code="POSTPROCESSING_FAILED")
+        return OutputsResponse(
+            status="failed",
+            error_code="POSTPROCESSING_FAILED",
+            current_transcript_version=meeting.transcript_version,
+        )
     response.status_code = status.HTTP_202_ACCEPTED
-    return OutputsResponse(status=job.status if job else "pending")
+    return OutputsResponse(
+        status=job.status if job else "pending",
+        current_transcript_version=meeting.transcript_version,
+    )
+
+
+@router.patch("/{meeting_id}/segments/{segment_id}", response_model=SegmentView)
+async def correct_segment(
+    meeting_id: str,
+    segment_id: str,
+    body: CorrectSegmentRequest,
+    principal: PrincipalDep,
+    session: SessionDep,
+) -> SegmentView:
+    """Correct one segment's text or speaker (Slice 6R item 7, Q9).
+
+    **Additive.** `text` and `words` are never written here — the correction
+    lands in `corrected_text` / `corrected_participant_id` beside them, so what
+    the model produced stays recoverable. That is not tidiness: L-28's shape and
+    every WER figure in §8 are claims about the model's output, and an
+    overwriting edit would make them unfalsifiable with no way to tell an edit
+    from a transcription.
+
+    **Correcting bumps `transcript_version`.** Any outputs already generated
+    were derived from the previous one, so the review page can see that they
+    describe text that has since changed. It does **not** re-run the summary:
+    that is a paid LLM call and Aymen's decision was to mark it for review and
+    offer a button, not to spend money on every keystroke.
+
+    Host-only, like ending a meeting. A guest holding a participant token can
+    speak into a transcript but not rewrite it.
+    """
+    if not is_valid_id(meeting_id) or not is_valid_id(segment_id):
+        raise NotFound()
+    if body.text is None and body.participant_id is None:
+        raise MosaiqueError(
+            ErrorCode.VALIDATION_FAILED, "a correction must change the text or the speaker"
+        )
+
+    repo = MeetingRepository(session, principal.organization_id)
+    meeting = authorize_meeting_access(principal, await repo.get(meeting_id))
+    require_host(principal)
+
+    segments = SegmentRepository(session, principal.organization_id)
+    segment = await segments.get_for_meeting(meeting_id, segment_id)
+    if segment is None:
+        raise NotFound()
+
+    if body.participant_id is not None:
+        # Reattribution has to stay inside this meeting: a segment owned by
+        # someone who was never in the room would break the roster the review
+        # page renders speakers from.
+        roster = await ParticipantRepository(session, principal.organization_id).list_for_meeting(
+            meeting_id
+        )
+        if body.participant_id not in {p.id for p in roster}:
+            raise MosaiqueError(
+                ErrorCode.VALIDATION_FAILED, "that speaker is not a participant in this meeting"
+            )
+        segment.corrected_participant_id = body.participant_id
+
+    if body.text is not None:
+        segment.corrected_text = body.text.strip()
+
+    segment.corrected_at = datetime.now(UTC)
+    # `subject_id` is the user id for a host, which is who this route allows.
+    segment.corrected_by = principal.subject_id
+    # The transcript is no longer the one the outputs were derived from.
+    meeting.transcript_version = (meeting.transcript_version or 1) + 1
+    await session.flush()
+
+    log.info(
+        "segment_corrected",
+        meeting_id=meeting_id,
+        segment_id=segment_id,
+        transcript_version=meeting.transcript_version,
+        text_changed=body.text is not None,
+        speaker_changed=body.participant_id is not None,
+    )
+    return segment_view(segment)
+
+
+@router.post("/{meeting_id}/outputs/regenerate", response_model=OutputsResponse, status_code=202)
+async def regenerate_outputs(
+    meeting_id: str, principal: PrincipalDep, session: SessionDep
+) -> OutputsResponse:
+    """Re-derive the summary from the corrected transcript.
+
+    Explicit, never automatic — one button, pressed by a person who has finished
+    editing. Correcting five segments should cost one LLM call, not five.
+
+    The idempotency key carries the transcript version, so pressing this twice
+    for the same version enqueues one job, while pressing it after a further
+    correction enqueues a new one. The previous outputs row is left alone: it is
+    a true record of what was derived from version N, and `GET /outputs` returns
+    the newest, so nothing has to be deleted for the right thing to show.
+    """
+    if not is_valid_id(meeting_id):
+        raise NotFound()
+    repo = MeetingRepository(session, principal.organization_id)
+    meeting = authorize_meeting_access(principal, await repo.get(meeting_id))
+    require_host(principal)
+
+    if MeetingState(meeting.state) is not MeetingState.COMPLETED:
+        raise MosaiqueError(
+            ErrorCode.MEETING_INVALID_TRANSITION,
+            "a meeting must be finished before its summary can be regenerated",
+        )
+
+    version = meeting.transcript_version or 1
+    created = await JobRepository(session).enqueue(
+        kind=JOB_KIND,
+        meeting_id=meeting.id,
+        organization_id=meeting.organization_id,
+        idempotency_key=f"{meeting.id}:{version}:{PROCESSOR_VERSION}",
+        payload={"transcript_version": version, "processor_version": PROCESSOR_VERSION},
+    )
+    log.info(
+        "outputs_regeneration_requested",
+        meeting_id=meeting_id,
+        transcript_version=version,
+        job_created=created,
+    )
+    return OutputsResponse(status="pending", current_transcript_version=version)
 
 
 # Canonical audio is headerless PCM, so the browser is told exactly that and
