@@ -12,7 +12,7 @@
  *
  * Pure and synchronous, so it is unit-tested without a socket or a browser.
  */
-export type SegmentStatus = "interim" | "final";
+export type SegmentStatus = "interim" | "final" | "gap";
 
 export interface TranscriptEntry {
   key: string;
@@ -41,6 +41,7 @@ export interface FinalMessage {
   sequence: number;
   revision: number;
   segment_id: string;
+  status?: "final" | "gap";
   text: string;
   start_ms: number;
   end_ms: number;
@@ -57,7 +58,7 @@ export class TranscriptReconciler {
     const key = keyOf(message.participant_id, message.sequence);
     const existing = this.entries.get(key);
 
-    if (existing?.status === "final") return false;
+    if (existing && existing.status !== "interim") return false;
     if (existing && message.revision <= existing.revision) return false;
 
     this.entries.set(key, {
@@ -65,7 +66,7 @@ export class TranscriptReconciler {
       participantId: message.participant_id,
       sequence: message.sequence,
       revision: message.revision,
-      status: message.type === "transcript.segment.final" ? "final" : "interim",
+      status: message.type === "transcript.segment.final" ? (message.status ?? "final") : "interim",
       text: message.text,
       startMs: message.start_ms,
       endMs: message.type === "transcript.segment.final" ? message.end_ms : undefined,

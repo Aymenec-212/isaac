@@ -10,10 +10,11 @@ It imports no WebSocket, FastAPI, or Starlette type. That is the D-04 rule, and
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import BinaryIO
+from typing import BinaryIO, Literal
 
 from mosaique.domain.ids import new_id
 from mosaique.observability.latency import LatencyDecomposition
@@ -37,6 +38,7 @@ from mosaique.realtime.ingress import (
     ResumeInfo,
 )
 from mosaique.realtime.protocol.messages import (
+    ErrorMessage,
     ParticipantEvent,
     ParticipantSpeaking,
     StreamStatus,
@@ -51,7 +53,6 @@ from mosaique.realtime.sessions.participant import (
 )
 from mosaique.speech.audio import AudioStore
 from mosaique.speech.interfaces import (
-    FAKE_IDENTITY,
     FRAME_DURATION_MS,
     SILENCE_FRAME,
     ASRErrorEvent,
@@ -117,6 +118,9 @@ PERSISTENCE_BUFFER_MAX = 200
 # silence. Short enough to keep segment closing responsive, long enough that a
 # burst of events is always drained first.
 TICK_INTERVAL_S = 0.05
+ASR_OPEN_TIMEOUT_S = 5.0
+ASR_RETRY_S = 5.0
+ASR_PUSH_TIMEOUT_S = 5.0
 
 
 def _now_ms() -> int:
@@ -162,9 +166,9 @@ class MeetingRuntime:
         # than globally so one meeting's numbers are readable on their own.
         self.latency = LatencyDecomposition()
         # What produced this meeting's words (ADR-13 consequence 3). Read off
-        # the first ASR session opened and written at finalization; the fake
-        # answers too, so the column is never NULL and never ambiguous.
-        self._asr_version: str = FAKE_IDENTITY.truncated()
+        # an ASR session that actually opened, written at finalization. If all
+        # opens fail, leave NULL rather than inventing fake-model provenance.
+        self._asr_version: str | None = None
         # One writer at a time. Every participant's pump persists through the
         # same buffer, and without this two of them interleave around the
         # `await`: the first snapshots the buffer, writes it, and clears a
@@ -174,9 +178,13 @@ class MeetingRuntime:
         self._consumer: asyncio.Task[None] | None = None
         self._idle_sweep: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
+        self._draining = False
+        self._persistence_lost = False
+        self._ingress_failed = False
+        self._closing_streams: dict[str, asyncio.Task[None]] = {}
 
     @property
-    def asr_version(self) -> str:
+    def asr_version(self) -> str | None:
         """What produced this meeting's words, for `Meeting.asr_version`."""
         return self._asr_version
 
@@ -211,14 +219,21 @@ class MeetingRuntime:
             log.error("idle_sweep_failed", error_type=type(exc).__name__)
 
     async def _close_idle_stream(self, participant_id: str) -> None:
+        task = self._closing_streams.get(participant_id)
+        if task is None:
+            task = asyncio.create_task(self._close_stream(participant_id))
+            self._closing_streams[participant_id] = task
+        try:
+            await asyncio.shield(task)
+        finally:
+            if task.done():
+                self._closing_streams.pop(participant_id, None)
+
+    async def _close_stream(self, participant_id: str) -> None:
         session = self._sessions.pop(participant_id, None)
         if session is None:
             return
-        await session.stop()
-        pump = self._pumps.pop(participant_id, None)
-        if pump is not None:
-            await asyncio.wait({pump}, timeout=5.0)
-        await self._finalize_session(session)
+        await self._finish_stream(session)
         await self._set_speaking(participant_id, False)
         log.info(
             "audio_session_closed_idle",
@@ -243,6 +258,7 @@ class MeetingRuntime:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            self._ingress_failed = True
             log.error("ingress_consumer_failed", error_type=type(exc).__name__)
         finally:
             self._stopped.set()
@@ -295,6 +311,17 @@ class MeetingRuntime:
             first_sequence = await SegmentRepository(
                 db, self.meeting.organization_id
             ).next_sequence(participant_id)
+            first_sequence = max(
+                first_sequence,
+                max(
+                    (
+                        held.sequence + 1
+                        for held in self._pending
+                        if held.participant_id == participant_id
+                    ),
+                    default=0,
+                ),
+            )
             await AudioSessionRepository(db, self.meeting.organization_id).create(
                 audio_session_id=audio_session_id,
                 meeting_id=self.meeting.meeting_id,
@@ -305,35 +332,37 @@ class MeetingRuntime:
                 ),
             )
 
-        asr = await self._recognizer.open_session(
-            ASRSessionConfig(
-                language="fr",
-                correlation={
-                    "meeting_id": self.meeting.meeting_id,
-                    "participant_id": participant_id,
-                },
-            )
-        )
-        identity = asr.identity
-        self._asr_version = identity.truncated()
         session = ParticipantSession(
             participant_id=participant_id,
             audio_session_id=audio_session_id,
-            asr_session=asr,
+            asr_session=None,
             segmenter=Segmenter(
                 first_sequence=first_sequence,
                 # Spike B1 §4: the MLX weights emit no end-of-turn signal at
                 # all, so on that runtime punctuation is the only boundary
                 # marker there is. Where a runtime does emit one, both rules
                 # are live and whichever fires first wins.
-                close_on_sentence_end=not asr.emits_end_of_turn,
+                close_on_sentence_end=False,
             ),
             epoch_ms=epoch_ms,
         )
         self._sessions[participant_id] = session
-        self._files[participant_id] = self._audio_store.open_session(
-            self.meeting.meeting_id, audio_session_id
-        )
+        try:
+            self._files[participant_id] = self._audio_store.open_session(
+                self.meeting.meeting_id, audio_session_id
+            )
+        except OSError:
+            session.recording_failed = True
+            await self._broadcaster.send_to(
+                participant_id,
+                ErrorMessage(
+                    code="AUDIO_RECORDING_FAILED",
+                    message="Enregistrement audio indisponible.",
+                    fatal=False,
+                ).model_dump(),
+            )
+        self._file_frames[participant_id] = 0
+        await self._publish_status(participant_id, "receiving")
         self._pumps[participant_id] = asyncio.create_task(self._pump(session))
         log.info(
             "participant_stream_opened",
@@ -398,7 +427,18 @@ class MeetingRuntime:
         )
 
     async def _on_frame(self, frame: IngressAudioFrame) -> None:
+        closing = self._closing_streams.get(frame.participant_id)
+        if closing is not None:
+            await closing
         session = self._sessions.get(frame.participant_id)
+        if (
+            session is not None
+            and session.failed_at is not None
+            and not self._draining
+            and time.monotonic() - session.failed_at >= ASR_RETRY_S
+        ):
+            await self._close_idle_stream(frame.participant_id)
+            session = None
         if session is None:
             # Audio after an idle close: the person is still in the meeting,
             # they just stopped talking for a while (D-02). Open a new
@@ -410,6 +450,17 @@ class MeetingRuntime:
             await self._open_stream(frame.participant_id, new_id())
             session = self._sessions[frame.participant_id]
             log.info("audio_session_reopened", participant_id=frame.participant_id)
+        if session.first_frame:
+            session.first_frame = False
+            session.sequence_base = frame.seq
+            session.epoch_ms = max(0, _now_ms() - self._started_at_ms)
+            async with session_scope() as db:
+                from mosaique.persistence.models import AudioSession
+
+                row = await db.get(AudioSession, session.audio_session_id)
+                if row is not None:
+                    row.epoch_ms = session.epoch_ms
+        seq = frame.seq - session.sequence_base
         if session.paused:
             # A frame is the clearest possible statement that they are back.
             session.paused = False
@@ -420,16 +471,32 @@ class MeetingRuntime:
         # the pump. A frame the ASR queue has no room for is still this
         # participant's audio, and the promise is that a skipped span stays
         # recoverable from disk even though it is never transcribed.
-        self._write_arrival(session, frame.seq, frame.pcm)
+        try:
+            self._write_arrival(session, seq, frame.pcm)
+        except OSError:
+            session.recording_failed = True
+            await self._publish_status(session.participant_id, "unavailable")
+            await self._broadcaster.send_to(
+                session.participant_id,
+                ErrorMessage(
+                    code="AUDIO_RECORDING_FAILED",
+                    message="Enregistrement audio indisponible.",
+                    fatal=False,
+                ).model_dump(),
+            )
+            log.error("audio_recording_failed", participant_id=session.participant_id)
+            return
 
         # Tech spec 8.3: frames that never arrived are padded with silence so
         # the timeline stays true, but a long run of them is marked rather than
         # left as an unexplained silence in the middle of someone talking.
-        missing_from = session.last_sequence + 1
-        missing = frame.seq - missing_from
-        session.accept(frame.seq, frame.pcm, _now_ms())
+        missing_from = (
+            0 if session.last_sequence == -1 else session.last_sequence - session.sequence_base + 1
+        )
+        missing = seq - missing_from
+        session.accept(seq, frame.pcm, _now_ms())
         if missing * FRAME_DURATION_MS > GAP_MARKER_MS:
-            await self._emit_gap(session, missing_from, frame.seq - 1)
+            await self._emit_gap(session, missing_from, seq - 1)
 
         await self._update_stream_status(session)
 
@@ -444,7 +511,7 @@ class MeetingRuntime:
         """
         handle = self._files.get(session.participant_id)
         if handle is None:
-            return
+            raise OSError("recording file unavailable")
         written = self._file_frames.get(session.participant_id, 0)
         if seq < written:
             return  # a duplicate; the sequence is already on disk
@@ -452,10 +519,17 @@ class MeetingRuntime:
         if padding:
             handle.write(SILENCE_FRAME * padding)
         handle.write(pcm)
+        handle.flush()
         self._file_frames[session.participant_id] = seq + 1
 
     async def _update_stream_status(self, session: ParticipantSession) -> None:
         """Map queue depth onto the five states of tech spec 8.4."""
+        if session.failed_at is not None or session.recording_failed:
+            await self._publish_status(session.participant_id, "unavailable")
+            return
+        if session.asr_session is None:
+            await self._publish_status(session.participant_id, "receiving")
+            return
         if session.overloaded_for_s() >= OVERLOAD_FAILURE_S:
             await self._fail_stream(session)
             return
@@ -503,39 +577,89 @@ class MeetingRuntime:
 
     async def _fail_stream(self, session: ParticipantSession) -> None:
         """Sustained overload: stop transcribing, keep recording (spec 8.4)."""
-        if self._stream_status.get(session.participant_id) == "unavailable":
+        if session.failed_at is not None:
             return
+        session.failed_at = time.monotonic()
+        session.gap_from = session.frames_pushed
+        if session.asr_session is not None:
+            with contextlib.suppress(Exception):
+                session.gap_from = min(
+                    session.frames_pushed,
+                    session.asr_session.health().transcribed_offset_ms // FRAME_DURATION_MS,
+                )
         await self._publish_status(session.participant_id, "unavailable")
-        span = session.take_skipped_span()
-        if span is not None:
-            await self._emit_gap(session, *span)
+        await self._set_speaking(session.participant_id, False)
         log.error("stream_unavailable", participant_id=session.participant_id)
 
     async def _pump(self, session: ParticipantSession) -> None:
-        """Queue -> recognizer -> segmenter -> broadcast + persist."""
-        reader = asyncio.create_task(self._read_events(session))
+        """Opening/inference belong to this participant, never the shared ingress."""
+        reader: asyncio.Task[None] | None = None
         try:
-            while True:
-                frame = await session.next_frame()
+            if session.asr_session is None:
+                session.asr_session = await asyncio.wait_for(
+                    self._recognizer.open_session(
+                        ASRSessionConfig(
+                            language="fr",
+                            correlation={
+                                "meeting_id": self.meeting.meeting_id,
+                                "participant_id": session.participant_id,
+                            },
+                        )
+                    ),
+                    ASR_OPEN_TIMEOUT_S,
+                )
+                self._asr_version = session.asr_session.identity.truncated()
+                session.segmenter = Segmenter(
+                    first_sequence=session.segmenter.next_sequence,
+                    close_on_sentence_end=not session.asr_session.emits_end_of_turn,
+                )
+            reader = asyncio.create_task(self._read_events(session))
+            while session.failed_at is None:
+                frame_task = asyncio.create_task(session.next_frame())
+                try:
+                    done, _ = await asyncio.wait(
+                        {frame_task, reader}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if reader in done:
+                        reader.result()
+                        raise RuntimeError("ASR event stream ended before input")
+                    frame = frame_task.result()
+                finally:
+                    if not frame_task.done():
+                        frame_task.cancel()
+                        await asyncio.gather(frame_task, return_exceptions=True)
                 if frame is None:
                     break
                 self.latency.on_dequeue(session.participant_id, frame.seq)
-                await session.push(frame)
-                # Pushing a frame never awaits anything real, so without this
-                # the pump can drain a full queue without once yielding and
-                # starve the reader that is turning those frames into text.
+                await asyncio.wait_for(session.push(frame), ASR_PUSH_TIMEOUT_S)
                 await asyncio.sleep(0)
-                # No tick here. `stream_offset_ms` is audio *pushed*, which runs
-                # ahead of what the recognizer has transcribed by the model
-                # delay, so ticking on it compares two different clocks and
-                # splits a phrase whenever the reader is behind — which is
-                # exactly what a replay makes happen. `_read_events` owns the
-                # tick, and does it against `transcribed_offset_ms` only once
-                # the reader has caught up (ADR-11).
+            if session.failed_at is None:
+                async with asyncio.timeout(5.0):
+                    await session.asr_session.flush()
+                    await self._consume_tail(session, reader)
         except asyncio.CancelledError:
+            await self._fail_stream(session)
             raise
+        except Exception as exc:
+            log.warning("asr_session_failed", error_type=type(exc).__name__)
+            await self._fail_stream(session)
         finally:
-            reader.cancel()
+            if reader is not None:
+                reader.cancel()
+                await asyncio.gather(reader, return_exceptions=True)
+            if session.asr_session is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(session.asr_session.close(), 1.0)
+
+    async def _consume_tail(self, session: ParticipantSession, reader: asyncio.Task[None]) -> None:
+        # Flush promises all tail events are emitted. Keep their sole reader
+        # alive until those events have actually been consumed and persisted.
+        assert session.asr_session is not None
+        while session.asr_session.health().events_emitted > session.events_consumed:
+            if reader.done():
+                reader.result()
+                raise RuntimeError("ASR reader ended during flush")
+            await asyncio.sleep(0)
 
     async def _read_events(self, session: ParticipantSession) -> None:
         """Single owner of the segmenter: recognizer events in, segments out.
@@ -550,6 +674,7 @@ class MeetingRuntime:
         Waiting briefly for the next event and only then ticking means the tick
         fires exactly when the reader has caught up.
         """
+        assert session.asr_session is not None
         events = session.asr_session.events()
         pending: asyncio.Task[ASREvent] | None = None
         consumed = 0
@@ -571,6 +696,8 @@ class MeetingRuntime:
                     # once the recognizer has nothing left queued; until then
                     # the words that disprove the silence are simply unread.
                     health = session.asr_session.health()
+                    if not health.healthy:
+                        raise RuntimeError("ASR session unhealthy")
                     if health.events_emitted == consumed:
                         await self._emit(
                             session,
@@ -587,9 +714,11 @@ class MeetingRuntime:
 
                 consumed += 1
                 await self._dispatch(session, event)
+                session.events_consumed = consumed
         finally:
             if pending is not None:
                 pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
 
     async def _dispatch(self, session: ParticipantSession, event: ASREvent) -> None:
         if isinstance(event, WordEvent):
@@ -604,6 +733,8 @@ class MeetingRuntime:
             await self._emit(session, session.segmenter.on_end_of_turn(event))
         elif isinstance(event, ASRErrorEvent):
             log.warning("asr_error", code=event.code, fatal=event.fatal)
+            if event.fatal or event.code == "ASR_TIMEOUT":
+                raise RuntimeError("ASR reported unavailable")
 
     async def _set_speaking(self, participant_id: str, speaking: bool) -> None:
         """Publish only on a transition, so the panel does not flicker."""
@@ -638,7 +769,7 @@ class MeetingRuntime:
     async def _persist_and_publish(self, session: ParticipantSession, event: SegmentFinal) -> None:
         # A gap is stored as a segment with its own status so a reader can tell
         # "nobody spoke here" from "we could not transcribe this" (spec 8.4).
-        status = "gap" if event.reason == "gap" else "final"
+        status: Literal["gap", "final"] = "gap" if event.reason == "gap" else "final"
         segment_id = new_id()
         pending = _PendingSegment(
             segment_id=segment_id,
@@ -659,6 +790,7 @@ class MeetingRuntime:
                 sequence=event.sequence,
                 revision=event.revision,
                 segment_id=segment_id,
+                status=status,
                 text=event.text,
                 start_ms=event.start_ms,
                 end_ms=event.end_ms,
@@ -700,6 +832,7 @@ class MeetingRuntime:
                 if len(self._pending) >= PERSISTENCE_BUFFER_MAX:
                     # Past here the runtime is holding more than it promised
                     # to. Say so rather than let the buffer grow without bound.
+                    self._persistence_lost |= len(self._pending) > PERSISTENCE_BUFFER_MAX
                     del self._pending[:-PERSISTENCE_BUFFER_MAX]
                     await self._publish_status(segment.participant_id, "unavailable")
             else:
@@ -717,53 +850,56 @@ class MeetingRuntime:
         `flush()` is the D-05 accelerated catch-up rather than a wait, which is
         what keeps this deadline generous instead of tight.
         """
-        if self._idle_sweep is not None:
-            self._idle_sweep.cancel()
-        for task in self._grace.values():
-            task.cancel()
-        self._grace.clear()
+        self._draining = True
+        try:
+            async with asyncio.timeout(deadline_s):
+                # Seal ingress, then consume every event accepted before end.
+                await self._ingress.stop()
+                if self._consumer is not None:
+                    await self._consumer
+                if self._idle_sweep is not None:
+                    self._idle_sweep.cancel()
+                    await asyncio.gather(self._idle_sweep, return_exceptions=True)
+                for task in self._grace.values():
+                    task.cancel()
+                await asyncio.gather(*self._grace.values(), return_exceptions=True)
+                self._grace.clear()
+                await asyncio.gather(*self._closing_streams.values())
+                await asyncio.gather(*(self._finish_stream(s) for s in self._sessions.values()))
+                await self._retry_pending()
+                if self._ingress_failed:
+                    raise RuntimeError("ingress did not reach durable completion")
+                if self._pending or self._persistence_lost:
+                    raise RuntimeError("final transcript persistence incomplete")
+        finally:
+            await self.stop()
 
-        for session in self._sessions.values():
+    async def _retry_pending(self) -> None:
+        async with self._persist_lock:
+            async with session_scope() as db:
+                repo = SegmentRepository(db, self.meeting.organization_id)
+                for held in self._pending:
+                    await repo.add_final(
+                        meeting_id=self.meeting.meeting_id,
+                        participant_id=held.participant_id,
+                        audio_session_id=held.audio_session_id,
+                        sequence=held.sequence,
+                        start_ms=held.start_ms,
+                        end_ms=held.end_ms,
+                        text=held.text,
+                        words=held.words,
+                        status=held.status,
+                        segment_id=held.segment_id,
+                    )
+            self._pending.clear()
+
+    async def _finish_stream(self, session: ParticipantSession) -> None:
+        pump = self._pumps.get(session.participant_id)
+        if pump is not None and not pump.done():
             await session.stop()
-
-        if self._pumps:
-            await asyncio.wait(self._pumps.values(), timeout=deadline_s)
-
-        for session in self._sessions.values():
-            try:
-                await asyncio.wait_for(session.asr_session.flush(), timeout=5.0)
-                for _ in range(50):
-                    await asyncio.sleep(0.01)
-                    if not session.segmenter.has_open_segment:
-                        break
-                await self._emit(session, session.segmenter.close_open())
-                await session.asr_session.close()
-            except TimeoutError:
-                log.warning("finalize_drain_timeout", participant_id=session.participant_id)
-
-        async with session_scope() as db:
-            repo = AudioSessionRepository(db, self.meeting.organization_id)
-            for session in self._sessions.values():
-                await repo.finish(
-                    session.audio_session_id,
-                    frames_received=session.frames_received,
-                    frames_dropped=session.frames_dropped,
-                )
-
-        for handle in self._files.values():
-            handle.close()
-        self._files.clear()
-
-        # Slice 4: the only place the decomposition is reported. There is no
-        # metrics endpoint until Slice 6, so it is logged as one structured
-        # record per meeting — which is also what the smoke test reads.
-        METRICS.merge_latency(self.latency)
-        log.info(
-            "latency_decomposition",
-            meeting_id=self.meeting.meeting_id,
-            asr_version=self._asr_version,
-            stages_ms=self.latency.snapshot(),
-        )
+            await pump
+        await self._finalize_session(session)
+        self._pumps.pop(session.participant_id, None)
 
     async def _close_participant(self, participant_id: str) -> None:
         """The transport went away. That is not the same as leaving.
@@ -803,15 +939,7 @@ class MeetingRuntime:
         except asyncio.CancelledError:
             return
         self._grace.pop(participant_id, None)
-        session = self._sessions.pop(participant_id, None)
-        if session is None:
-            return
-
-        await session.stop()
-        pump = self._pumps.pop(participant_id, None)
-        if pump is not None:
-            await asyncio.wait({pump}, timeout=5.0)
-        await self._finalize_session(session)
+        await self._close_idle_stream(participant_id)
 
         await self._announce_departure(participant_id)
         log.info("participant_stream_expired", participant_id=participant_id)
@@ -832,12 +960,12 @@ class MeetingRuntime:
 
     async def _finalize_session(self, session: ParticipantSession) -> None:
         """Close one stream's ASR session, open segment, audio file and row."""
-        try:
-            await asyncio.wait_for(session.asr_session.flush(), timeout=5.0)
-            await self._emit(session, session.segmenter.close_open())
-            await session.asr_session.close()
-        except TimeoutError:
-            log.warning("finalize_drain_timeout", participant_id=session.participant_id)
+        await self._emit(session, session.segmenter.close_open())
+        if session.gap_from is not None:
+            last = self._file_frames.get(session.participant_id, 0) - 1
+            if last >= session.gap_from:
+                await self._emit_gap(session, session.gap_from, last)
+                session.gap_from = None
 
         async with session_scope() as db:
             await AudioSessionRepository(db, self.meeting.organization_id).finish(
@@ -855,11 +983,17 @@ class MeetingRuntime:
         for task in self._grace.values():
             task.cancel()
         self._grace.clear()
+        for task in self._closing_streams.values():
+            task.cancel()
+        await asyncio.gather(*self._closing_streams.values(), return_exceptions=True)
+        self._closing_streams.clear()
         for pump in self._pumps.values():
             pump.cancel()
         if self._consumer is not None:
             self._consumer.cancel()
-        await self._ingress.stop()
+        await asyncio.gather(*self._pumps.values(), return_exceptions=True)
+        if self._consumer is not None:
+            await asyncio.gather(self._consumer, return_exceptions=True)
         for handle in self._files.values():
             handle.close()
         self._files.clear()

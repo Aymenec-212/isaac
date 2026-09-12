@@ -5,8 +5,8 @@
 > the WebRTC exclusion and older single-user-first sequencing where they conflict.
 > Direct WebRTC/TURN carries voice; the existing PCM WebSocket and ASR seams remain.
 > Work proceeds one slice, one documented PR, review/merge, then the next slice.
-> R1 merged as PR #20. [R2 remote ASR protocol](r2-remote-asr.md) is
-> ready for review; real GPU acceptance remains open. No resources are deployed.
+> R2 merged as PR #21. [R3 failure/lifecycle](r3-failure-lifecycle.md) is
+> implemented/tested for review; real GPU acceptance remains open. No resources are deployed.
 > Historical text below retains its evidence; use root PROJECT_STATE.md for next work.
 
 **Version:** 1.2 (scope restored)

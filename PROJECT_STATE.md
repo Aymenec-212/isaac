@@ -1,13 +1,14 @@
 # PROJECT_STATE.md
 
 **Project:** Mosaïque — realtime meeting intelligence, French-first
-**Last updated:** 2026-09-12 (rev 27 — R2 remote ASR protocol, GPU gate open)
-**Updated by:** Codex, R2 adapter slice
-**Current slice:** **R2 — adapter and probe implemented on the R2 branch;
-real NVIDIA acceptance unverified.** R1 merged in PR #20 (`6f4cf1d`).
-See [R2 protocol, tests and region findings](docs/r2-remote-asr.md). Ready/capacity,
-VAD head/timeline, bounded terminal flush, failed-session cleanup and cached
-remote readiness are covered by tests. No GPU deployment or region change.
+**Last updated:** 2026-09-13 (rev 28 — R3 failure/lifecycle, GPU gate open)
+**Updated by:** Codex, R3 lifecycle slice
+**Current slice:** **R3 — implemented and tested on the R3 branch; review pending.**
+R2 merged in PR #21 (`61c9c49`). See [R3 behavior, tests and limits](docs/r3-failure-lifecycle.md).
+Recording/membership survive recognizer opening and processing failures;
+recovery uses fresh audio/inference sessions with visible gaps. Shared finalization
+waits for durable persistence; startup recovers stranded intelligence jobs.
+No GPU deployment, region amendment or WebRTC implementation is included.
 
 **Current priority:** two remote participants hear each other through Mosaïque,
 stream separate microphones into real concurrent Rust `moshi-server` ASR, see
@@ -17,8 +18,8 @@ available credit, and continued voice with a warning during ASR outages.
 
 **Start at [the architecture and PR sequence](docs/two-user-cloud-architecture.md),
 then §12 below.** One slice → one documented PR → maintainer review/merge → next
-slice. Review/merge R2 before R3; real GPU acceptance stays open. The R2 baseline
-is `6f4cf1d` (merged PR #20). Existing local dependency/build-state
+slice. Review/merge R3 before R4; real GPU acceptance stays open. The R3 baseline
+is `61c9c49` (merged PR #21). Existing local dependency/build-state
 changes and untracked `scripts/` are outside this slice.
 
 This explicitly supersedes companion-only D-01/ADR-01 and the earlier instruction
@@ -50,8 +51,18 @@ MLX mypy errors remain, no new errors. Remote ready/flush are implemented, but n
 real-server report exists. France Central T4 has no listed SKU restriction at
 $0.615/hour; its quota query is empty. Region/cost details are in the R2 document.
 
+**R3 evidence (2026-09-13):** full backend suite **444 passed, 1 deselected**
+with explicit fake ASR/LLM and isolated native PostgreSQL 14; includes 14 new
+lifecycle unit tests and 8 new gateway/database tests. Frontend **93 passed**,
+typecheck/build pass. The accelerated-hour test passes (**1 passed, 444 deselected**,
+68.63 seconds); 26 focused lifecycle/persistence tests were rerun after final review.
+Backend ruff/format pass and OpenAPI has no drift. Mypy
+retains eight existing MLX errors, with no new errors (100 source files).
+Real GPU interruption, PostgreSQL 16 container parity and browser-call acceptance
+remain unverified. Docker Desktop remains manually paused.
+
 **Historical context below:** earlier phase/priority instructions are retained as
-history and superseded by this header and §12's R2 entry wherever they conflict.
+history and superseded by this header and §12's R3 entry wherever they conflict.
 
 **Why 6R exists.** PR #14 validated on the M1 and the review experience was the
 next thing named: *"before moving on to the two users and serving the ASR model on
@@ -180,8 +191,8 @@ about **two real streams at once**, which MLX cannot do at all (L-26).
 | Tests passing | **516, and the current numbers are the M1's own as of 2026-09-10: backend `398 passed, 1 deselected`, frontend `91 passed`, 19 Playwright browser specs, typecheck and build clean, migration `0002` applied cleanly against a real database.** Composition: 305 backend unit, 93 backend integration and realtime (real PostgreSQL), 91 frontend unit, 19 browser specs, plus one opt-in accelerated hour behind `-m slow`. *The history below is kept because each rev's number is what was true then; read the sentence above for what is true now.* **Re-run by Aymen on his M1, 2026-09-08 — all green.** Backend `380 passed, 1 deselected`, matching this sandbox exactly; measured-timing and reconnect/idle/health subsets green; frontend `72 passed`; PostgreSQL healthy in Docker; **`/readyz` ready with MLX weights and database healthy**; frontend serving on `127.0.0.1:5173`. `npm run build` clean. **Rev 19 adds two, in this sandbox on Linux:** backend `382 passed, 1 deselected in 104.73s` with `tests/integration/test_full_lifecycle.py`, frontend `72 passed` and `npm run build` clean, unchanged because no frontend file was touched. The accelerated hour still passes behind `-m slow` — `1 passed, 382 deselected in 70.58s`. **Rev 20 re-ran the browser suite in this sandbox and it is now 8 specs, all passing** — the 2 pre-existing ones included, since `App.tsx` and `MeetingList.tsx` both changed. Frontend unit 72 -> 79. **Rev 22 takes it to 91 unit and 14 browser specs**, the 6 new ones in `e2e/review.spec.ts`; the backend is untouched by 6R so far and stays at `382 passed, 1 deselected`. **Rev 23 takes the backend to `398 passed, 1 deselected`** with `test_segment_corrections.py` (16) and the browser suite to 19 with `e2e/corrections.spec.ts` (5). **Rev 24 is the M1 re-run of all of it, by Aymen on 2026-09-10: backend `398 passed, 1 deselected`, frontend `91 passed`, typecheck and production build clean, 19 browser specs, and migration `0002` applied cleanly against his database.** The sandbox and the M1 now agree on 398, which — with no CI (L-18) — is the only cross-check this project has, and the first time the M1 has produced the current number rather than a stale one. **None of these executes a model or a provider**: the ASR evidence is a report (L-27) and the LLM's numbers have never been counted (L-31) |
 | Lint / types | ruff clean; ruff format clean (**147** files); mypy strict clean on **99** source files; `tsc --noEmit` clean; `openapi.json` regenerated with no drift (**12** paths — `PATCH /meetings/{id}/segments/{id}` and `POST /meetings/{id}/outputs/regenerate` are the two new ones). *Counts re-read in rev 23; the 97/144/10 they replace were rev 19's and grew with item 7. Re-read them rather than trusting this line — with no CI, drift here is silent* |
 | Known gap | A-8 unvalidated: every run so far is loopback on one machine. Spike A not run. A-3, A-16 and `moshi_server` all still need a CUDA host. **No CI runs on this repository** — see L-18, which now also means the one run that proves Slice 4 is reproducible only by hand, on hardware. |
-| Next action | **Review R2** and `docs/r2-remote-asr.md`; resolve quota/eligibility for a candidate EU region and review deployment parameters before real GPU testing. |
-| Next gate | **R2 protocol review and real-GPU acceptance, still open.** The overall two-user gate is a real 30-minute cross-network WebRTC call with two concurrent Rust ASR streams and persisted, reviewable Slice 5 outputs. **Not implemented or verified.** Prior Slice 6R evidence remains unchanged. |
+| Next action | **Review R3** and `docs/r3-failure-lifecycle.md`; R4 follows merge. Resolve quota/eligibility and review region parameters before real GPU testing. |
+| Next gate | **R3 lifecycle review and real-GPU acceptance, still open.** The overall two-user gate is a real 30-minute cross-network WebRTC call with two concurrent Rust ASR streams and persisted, reviewable Slice 5 outputs. **Not implemented or verified.** Prior Slice 6R evidence remains unchanged. |
 
 ---
 
@@ -546,6 +557,7 @@ Current, as of planning. Each is a deliberate choice, not an oversight.
 
 | Date | Change |
 |---|---|
+| 2026-09-13 | **rev 28 / R3.** Per-participant ASR failure isolation and fresh-session recovery, exact PCM/gap tests, bounded ingress/fan-out, shared durable finalization and stranded-job recovery. 444 backend tests and 93 frontend tests pass; GPU interruption remains unverified. R2 merged #21. |
 | 2026-09-12 | **rev 27 / R2.** Ready/capacity handshake, fixed VAD head and per-stream progress, terminal marker+silence flush, failure cleanup, cached readiness/admission and real-server probe. 329 backend unit tests pass; no NVIDIA gate claimed. R1 merged #20. Five EU T4 candidates have no listed restriction; quota/credit/allocation still unresolved. |
 | 2026-09-12 | **rev 26 / R1.** Add two-host Bicep, pinned CUDA/Rust/model configuration, private ASR Compose, secret and checksum helpers, five offline tests and deployment/rollback runbook. Bicep compilation and Compose validation passed. West Europe T4 is NotAvailableForSubscription; no resources provisioned, image built or real ASR verified. R0 merged in PR #19. |
 | 2026-09-12 | **rev 25 / R0 — documentation only.** Specify two-user in-product voice via direct WebRTC/TURN, independent PCM transcription through remote Rust Kyutai, and a two-host Azure candidate. Record the maintainer’s carrier/outage decisions, subscription/quota uncertainty, measured retail estimates, current-code gaps, exact acceptance protocol and one-slice/one-PR workflow. Supersede older single-user-first sequencing without erasing its evidence. Planning-pass checks (2026-09-11): backend unit 305 passed / 94 deselected; frontend 91 passed; typecheck passed. No new model, cloud or remote-call verification; deployment review pending. |
@@ -583,12 +595,14 @@ Written so a cold session can start without re-deriving anything. This section
 describes **intent**, unlike the rest of this file; when it disagrees with the
 tables above, the tables are right.
 
-### START HERE — R2 review and real-GPU gate (2026-09-12)
+### START HERE — R3 review and real-GPU gate (2026-09-13)
 
-R1 is merged as PR #20. Review R2 and its real-server probe. EU candidates
+R2 is merged as PR #21. R3 is implemented/tested for review; see its lifecycle
+document for exact behavior, failure semantics and rollback. Review/merge before
+R4's identity/guest work. R2 and R3 hardware acceptance remains open. EU candidates
 include France/Spain/Italy/Poland/Sweden; unrestricted SKU listings are not proof
 of quota or allocation. Resolve eligibility and review a region amendment before
-provisioning. R2 protocol tests do not close its NVIDIA acceptance gate.
+provisioning. No hardware or call acceptance is implied by the fake tests.
 Follow the
 ordered gates in [the architecture document](docs/two-user-cloud-architecture.md#7-slice-by-slice-pr-sequence).
 Do not provision while R1 feasibility is blocked or automatically merge a PR. Each later PR explains

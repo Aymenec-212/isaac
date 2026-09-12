@@ -46,12 +46,14 @@ class MeetingRepository:
         await self._session.flush()
         return meeting
 
-    async def get(self, meeting_id: str) -> Meeting | None:
+    async def get(self, meeting_id: str, *, for_update: bool = False) -> Meeting | None:
         """Fails closed: a meeting owned by another organization returns None."""
         stmt = select(Meeting).where(
             Meeting.id == meeting_id,
             Meeting.organization_id == self._organization_id,
         )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def list(self, *, limit: int = 50, offset: int = 0) -> Sequence[Meeting]:
