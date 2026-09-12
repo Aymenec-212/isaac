@@ -1,0 +1,36 @@
+services:
+  asr:
+    image: ${ASR_IMAGE:?Set the built image reference with sha256 digest}
+    platform: linux/amd64
+    build:
+      context: .
+    ports:
+      - "${ASR_PRIVATE_IP:?Set GPU private IP}:8080:8080"
+    volumes:
+      - type: bind
+        source: ${MODEL_DIR:?Set the persistent verified model directory}
+        target: /models
+        read_only: true
+    secrets:
+      - asr_api_key
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,uid=10001,gid=10001,mode=0700
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+secrets:
+  asr_api_key:
+    file: ${ASR_KEY_FILE:?Set path to protected ASR key file}
