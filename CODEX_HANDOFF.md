@@ -5,8 +5,8 @@
 > the WebRTC exclusion and older single-user-first sequencing where they conflict.
 > Direct WebRTC/TURN carries voice; the existing PCM WebSocket and ASR seams remain.
 > Work proceeds one slice, one documented PR, review/merge, then the next slice.
-> R0 merged as PR #19. [R1 deployment configuration](docs/r1-azure-deployment.md) is ready
-> for review; Azure GPU feasibility is blocked and no resources are deployed.
+> R1 merged as PR #20. [R2 remote ASR protocol](docs/r2-remote-asr.md) is
+> ready for review; real GPU acceptance remains open. No resources are deployed.
 > Historical text below retains its evidence; use root PROJECT_STATE.md for next work.
 
 **Mosaïque — realtime meeting intelligence, French-first, for French SMBs.**
