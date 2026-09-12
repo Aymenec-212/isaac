@@ -31,6 +31,7 @@ class MeetingRegistry:
         self._runtimes: dict[str, MeetingRuntime] = {}
         self._ingresses: dict[str, BrowserWebSocketIngress] = {}
         self._lock = asyncio.Lock()
+        self._finalizing: dict[str, asyncio.Task[str | None]] = {}
 
     @property
     def recognizer(self) -> StreamingRecognizer:
@@ -57,6 +58,8 @@ class MeetingRegistry:
 
     async def ensure(self, meeting: MeetingRef, started_at_ms: int) -> MeetingRuntime:
         async with self._lock:
+            if meeting.meeting_id in self._finalizing:
+                raise RuntimeError("meeting is finalizing")
             existing = self._runtimes.get(meeting.meeting_id)
             if existing is not None:
                 return existing
@@ -89,13 +92,22 @@ class MeetingRegistry:
         connected — and the column is honestly left NULL.
         """
         async with self._lock:
-            runtime = self._runtimes.pop(meeting_id, None)
-            self._ingresses.pop(meeting_id, None)
+            task = self._finalizing.get(meeting_id)
+            if task is None:
+                task = asyncio.create_task(self._finalize(meeting_id))
+                self._finalizing[meeting_id] = task
+        return await asyncio.shield(task)
+
+    async def _finalize(self, meeting_id: str) -> str | None:
+        runtime = self._runtimes.get(meeting_id)
         if runtime is None:
             return None
-        await runtime.drain()
-        await runtime.stop()
-        return runtime.asr_version
+        try:
+            await runtime.drain()
+            return runtime.asr_version
+        finally:
+            self._runtimes.pop(meeting_id, None)
+            self._ingresses.pop(meeting_id, None)
 
     async def close_sockets(self, *, code: int) -> None:
         """Hang up on everyone, with a code that says why (tech spec 14.1).

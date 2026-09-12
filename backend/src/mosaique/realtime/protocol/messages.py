@@ -75,7 +75,7 @@ class TranscriptSegmentFinal(BaseModel):
     participant_id: str
     sequence: int
     revision: int
-    status: Literal["final"] = "final"
+    status: Literal["final", "gap"] = "final"
     segment_id: str
     text: str
     start_ms: int

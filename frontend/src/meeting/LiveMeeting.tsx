@@ -19,15 +19,14 @@ const CONNECTION_LABEL: Record<ConnectionState, string> = {
   error: "Transcription indisponible",
 };
 
-/* The five states of tech spec 8.4. `unavailable` says plainly that the
-   transcript has stopped while the recording has not, because that is the one
-   case where a participant might otherwise stop talking for nothing. */
+/* Transcription state does not certify recording durability. Recording
+   failures arrive separately as AUDIO_RECORDING_FAILED. */
 const STREAM_LABEL: Record<StreamState, string> = {
   listening: "Micro coupé",
   receiving: "Réception de l'audio…",
   transcribing: "Transcription en cours",
   delayed: "Transcription en retard",
-  unavailable: "Transcription indisponible — l'audio est toujours enregistré",
+  unavailable: "Transcription indisponible — une partie du texte peut manquer",
 };
 
 export function LiveMeeting({
@@ -87,6 +86,7 @@ export function LiveMeeting({
                   sequence: segment.sequence,
                   revision: 1,
                   segment_id: segment.id,
+                  status: segment.status === "gap" ? "gap" as const : "final" as const,
                   text: segment.text,
                   start_ms: segment.start_ms,
                   end_ms: segment.end_ms,
@@ -120,6 +120,11 @@ export function LiveMeeting({
       },
       onMeetingState: (state) => {
         if (state === "COMPLETED") onEnded();
+        if (state === "FAILED") {
+          void capture.current?.stop();
+          meetingClient.close();
+          setMicError("La finalisation a échoué. Le compte rendu est incomplet.");
+        }
       },
       onConnectionState: setConnection,
       onError: (code, message) => setMicError(`${code} — ${message}`),
@@ -139,6 +144,8 @@ export function LiveMeeting({
     try {
       await api.endMeeting(meetingId);
       onEnded();
+    } catch {
+      setMicError("La finalisation a échoué. Le compte rendu est incomplet.");
     } finally {
       setEnding(false);
     }

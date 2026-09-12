@@ -31,6 +31,7 @@ export interface MeetingClientHandlers {
 export class MeetingClient {
   private socket: WebSocket | null = null;
   private sequence = 0;
+  private participantId: string | null = null;
   private captureStartedAt = 0;
   private attempt = 0;
   private closing = false;
@@ -73,6 +74,7 @@ export class MeetingClient {
       }
       switch (message.type) {
         case "hello.ok":
+          this.participantId = message.participant_id;
           this.attempt = 0;
           this.handlers.onConnectionState("live");
           this.flushBuffer();
@@ -84,7 +86,9 @@ export class MeetingClient {
           this.handlers.onTranscript(message as TranscriptMessage);
           break;
         case "stream.status":
-          this.handlers.onStreamStatus(message.status as StreamState, message.lag_ms ?? 0);
+          if (message.participant_id === this.participantId) {
+            this.handlers.onStreamStatus(message.status as StreamState, message.lag_ms ?? 0);
+          }
           break;
         case "meeting.state":
           this.handlers.onMeetingState(message.state);

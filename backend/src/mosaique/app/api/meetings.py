@@ -208,7 +208,7 @@ async def end_meeting(
     if not is_valid_id(meeting_id):
         raise NotFound()
     repo = MeetingRepository(session, principal.organization_id)
-    meeting = authorize_meeting_access(principal, await repo.get(meeting_id))
+    meeting = authorize_meeting_access(principal, await repo.get(meeting_id, for_update=True))
     require_host(principal)
 
     current = MeetingState(meeting.state)
@@ -221,8 +221,21 @@ async def end_meeting(
     await session.flush()
     await session.commit()
 
-    asr_version = await get_registry().finalize(meeting_id)
+    try:
+        asr_version = await get_registry().finalize(meeting_id)
+    except Exception:
+        meeting.state = str(MeetingState.FAILED)
+        await session.commit()
+        await get_registry().broadcaster.publish(
+            meeting_id, MeetingStateMessage(state=str(MeetingState.FAILED)).model_dump()
+        )
+        raise MosaiqueError(
+            ErrorCode.MEETING_INVALID_TRANSITION, "Finalization did not reach durable completion"
+        ) from None
 
+    meeting = authorize_meeting_access(principal, await repo.get(meeting_id, for_update=True))
+    if meeting.state == str(MeetingState.COMPLETED):
+        return EndMeetingResponse(meeting=MeetingView.model_validate(meeting))
     meeting.state = str(MeetingState.COMPLETED)
     meeting.transcript_version = 1
     # ADR-13 consequence 3: model, runtime and quantization together, or an
@@ -240,6 +253,7 @@ async def end_meeting(
         idempotency_key=f"{meeting.id}:1:{PROCESSOR_VERSION}",
         payload={"transcript_version": 1, "processor_version": PROCESSOR_VERSION},
     )
+    await session.commit()
     METRICS.meeting_completed()
     log.info("meeting_completed", meeting_id=meeting.id, job_created=created)
 

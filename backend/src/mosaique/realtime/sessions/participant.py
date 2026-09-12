@@ -52,7 +52,7 @@ class ParticipantSession:
         *,
         participant_id: str,
         audio_session_id: str,
-        asr_session: ASRSession,
+        asr_session: ASRSession | None,
         segmenter: Segmenter,
         epoch_ms: int,
     ) -> None:
@@ -85,6 +85,12 @@ class ParticipantSession:
         self.frames_dropped = 0
         self.frames_pushed = 0  # includes silence padding
         self.closed = False
+        self.failed_at: float | None = None
+        self.gap_from: int | None = None
+        self.sequence_base = 0
+        self.first_frame = True
+        self.events_consumed = 0
+        self.recording_failed = False
 
     # ---- ADR-11 timeline -------------------------------------------------
 
@@ -142,7 +148,7 @@ class ParticipantSession:
         """
         if self._skipped_from is None or self.queue_full:
             return None
-        span = (self._skipped_from, self.last_sequence)
+        span = (self._skipped_from, self.last_sequence - self.sequence_base)
         self._skipped_from = None
         return span
 
@@ -163,7 +169,7 @@ class ParticipantSession:
         The gateway seeds a resumed socket from this so a client replaying its
         buffer cannot smuggle duplicates past the check by reconnecting.
         """
-        return -1 if self._last_seq is None else self._last_seq
+        return -1 if self._last_seq is None else self._last_seq + self.sequence_base
 
     def idle_for_s(self) -> float:
         """Wall seconds since the last accepted frame.
@@ -195,11 +201,14 @@ class ParticipantSession:
         return self.queue_depth * FRAME_DURATION_MS
 
     async def next_frame(self) -> QueuedFrame | None:
+        if self.closed and self._queue.empty():
+            return None
         return await self._queue.get()
 
     async def stop(self) -> None:
         self.closed = True
-        await self._queue.put(None)
+        if not self._queue.full():
+            self._queue.put_nowait(None)
 
     # ---- outbound to the recognizer --------------------------------------
 
@@ -210,6 +219,7 @@ class ParticipantSession:
         which is why FR-11 timestamp navigation needs no index table.
         Returns the number of padding frames inserted.
         """
+        assert self.asr_session is not None
         padding = 0
         expected = self.frames_pushed
         gap = frame.seq - expected

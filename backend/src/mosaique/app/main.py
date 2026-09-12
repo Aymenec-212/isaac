@@ -84,9 +84,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     processor = MeetingIntelligenceProcessor(
         build_llm_provider(settings), broadcaster=get_registry().broadcaster
     )
-    processor.start()
-
     await recover_finalizing_meetings()
+    await processor.recover_running()
+    processor.start()
     log.info("app_started", environment=settings.environment, version=__version__)
     yield
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any, Protocol
 
 from mosaique.observability.logging import get_logger
 
 log = get_logger(__name__)
+WRITE_TIMEOUT_S = 1.0
 
 
 class SocketLike(Protocol):
@@ -42,12 +44,26 @@ class SocketBroadcaster:
                     self._sockets.pop(meeting_id, None)
 
     async def publish(self, meeting_id: str, message: dict[str, object]) -> None:
-        for participant_id, socket in list(self._sockets.get(meeting_id, {}).items()):
-            try:
-                await socket.send_json(message)
-            except Exception:
-                # A dead socket must never stall the transcript pipeline.
-                log.info("broadcast_socket_dropped", participant_id=participant_id)
+        await asyncio.gather(
+            *(
+                self._send(meeting_id, participant_id, socket, message)
+                for participant_id, socket in list(self._sockets.get(meeting_id, {}).items())
+            )
+        )
+
+    async def _send(
+        self, meeting_id: str, participant_id: str, socket: SocketLike, message: dict[str, object]
+    ) -> None:
+        try:
+            await asyncio.wait_for(socket.send_json(message), WRITE_TIMEOUT_S)
+        except Exception:
+            async with self._lock:
+                room = self._sockets.get(meeting_id, {})
+                if room.get(participant_id) is socket:
+                    room.pop(participant_id)
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(socket.close(code=1013), WRITE_TIMEOUT_S)
+            log.info("broadcast_socket_dropped", participant_id=participant_id)
 
     async def close_all(self, *, code: int) -> None:
         """Close every socket in every meeting, ignoring the ones already gone."""
@@ -56,16 +72,13 @@ class SocketBroadcaster:
         for room in rooms:
             for participant_id, socket in room.items():
                 try:
-                    await socket.close(code=code)
+                    await asyncio.wait_for(socket.close(code=code), WRITE_TIMEOUT_S)
                 except Exception:
                     log.info("close_socket_dropped", participant_id=participant_id)
 
     async def send_to(self, participant_id: str, message: dict[str, object]) -> None:
-        for room in self._sockets.values():
+        for meeting_id, room in list(self._sockets.items()):
             socket = room.get(participant_id)
             if socket is not None:
-                try:
-                    await socket.send_json(message)
-                except Exception:
-                    log.info("send_socket_dropped", participant_id=participant_id)
+                await self._send(meeting_id, participant_id, socket, message)
                 return

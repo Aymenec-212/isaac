@@ -17,6 +17,8 @@ import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
+
 from mosaique.intelligence.prompt import SYSTEM_PROMPT, build_user_prompt
 from mosaique.intelligence.provider import LLMProvider
 from mosaique.intelligence.schema import (
@@ -26,7 +28,7 @@ from mosaique.intelligence.schema import (
 )
 from mosaique.observability.logging import get_logger
 from mosaique.persistence.engine import session_scope
-from mosaique.persistence.models import Job
+from mosaique.persistence.models import Job, MeetingOutputs
 from mosaique.persistence.repositories.transcript import (
     JobRepository,
     OutputsRepository,
@@ -67,6 +69,43 @@ class MeetingIntelligenceProcessor:
         self._broadcaster = broadcaster
         self._task: asyncio.Task[None] | None = None
         self._stopping = asyncio.Event()
+
+    async def recover_running(self) -> int:
+        """Single-process startup only: no live worker may own these claims."""
+        async with session_scope() as db:
+            jobs = (
+                (
+                    await db.execute(
+                        select(Job)
+                        .where(Job.kind == JOB_KIND, Job.status == "running")
+                        .with_for_update()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for job in jobs:
+                payload = job.payload or {}
+                output = (
+                    await db.execute(
+                        select(MeetingOutputs.id).where(
+                            MeetingOutputs.meeting_id == job.meeting_id,
+                            MeetingOutputs.organization_id == job.organization_id,
+                            MeetingOutputs.transcript_version
+                            == int(payload.get("transcript_version", 1)),
+                            MeetingOutputs.processor_version
+                            == payload.get("processor_version", PROCESSOR_VERSION),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if output is not None:
+                    job.status = "succeeded"
+                    job.last_error = None
+                else:
+                    job.status = "failed" if job.attempts >= MAX_ATTEMPTS else "pending"
+                    job.next_run_at = datetime.now(UTC)
+                    job.last_error = "Worker interrupted before durable output"
+            return len(jobs)
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._loop())

@@ -24,13 +24,14 @@ from mosaique.observability.metrics import METRICS
 from mosaique.persistence.engine import session_scope
 from mosaique.persistence.repositories.meetings import MeetingRepository
 from mosaique.persistence.repositories.transcript import ParticipantRepository
+from mosaique.realtime.gateway.ingress import BrowserWebSocketIngress
 from mosaique.realtime.ingress import (
     MeetingRef,
     ParticipantAudioState,
     ParticipantJoined,
     ParticipantLeft,
 )
-from mosaique.realtime.ingress.interfaces import IngressAudioFrame
+from mosaique.realtime.ingress.interfaces import IngressAudioFrame, IngressEvent
 from mosaique.realtime.protocol.frames import FrameRejection, InvalidFrame, decode_frame
 from mosaique.realtime.protocol.messages import ErrorMessage, Hello, HelloOk, Ping, Pong
 from mosaique.realtime.runtime_state import get_registry, is_draining
@@ -47,6 +48,26 @@ STALE_AFTER_S = 30.0
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+async def _submit(
+    ingress: BrowserWebSocketIngress, event: IngressEvent, websocket: WebSocket
+) -> bool:
+    if ingress.submit(event):
+        return True
+    try:
+        async with asyncio.timeout(1.0):
+            await websocket.send_json(
+                ErrorMessage(
+                    code="INGRESS_UNAVAILABLE",
+                    message="Audio was not accepted; reconnect to resume capture.",
+                    fatal=False,
+                ).model_dump()
+            )
+            await websocket.close(code=1013)
+    except Exception:
+        pass
+    return False
 
 
 async def _keepalive(websocket: WebSocket, liveness: _Liveness) -> None:
@@ -183,13 +204,16 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
         # checked for duplicates.
         resume = runtime.resume_info(participant_id)
 
-        ingress.submit(
+        if not await _submit(
+            ingress,
             ParticipantJoined(
                 participant_id=participant_id,
                 display_name=display_name,
                 audio_session_id=audio_session_id,
-            )
-        )
+            ),
+            websocket,
+        ):
+            return
         await websocket.send_json(
             HelloOk(
                 participant_id=participant_id,
@@ -233,15 +257,18 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                     continue
                 last_seq = frame.sequence
                 METRICS.frame_received()
-                ingress.submit(
+                if not await _submit(
+                    ingress,
                     IngressAudioFrame(
                         participant_id=participant_id,
                         audio_session_id=audio_session_id,
                         seq=frame.sequence,
                         pcm=frame.pcm,
                         capture_ms=frame.capture_ms,
-                    )
-                )
+                    ),
+                    websocket,
+                ):
+                    break
                 continue
 
             if (text := message.get("text")) is not None:
@@ -251,16 +278,19 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                     await websocket.send_json(Pong(t=payload.get("t", _now_ms())).model_dump())
                 elif kind == "pong":
                     pass  # `liveness.seen()` above already recorded it
-                elif kind in ("audio.pause", "audio.resume"):
+                elif kind in ("audio.pause", "audio.resume"):  # noqa: SIM102
                     # Tech spec 7.1: the session stays, the server just stops
                     # expecting frames. Without this a mute is indistinguishable
                     # from a stalled network and the status bar cries wolf.
-                    ingress.submit(
+                    if not await _submit(
+                        ingress,
                         ParticipantAudioState(
                             participant_id=participant_id,
                             paused=kind == "audio.pause",
-                        )
-                    )
+                        ),
+                        websocket,
+                    ):
+                        break
 
     except WebSocketDisconnect:
         pass
@@ -273,6 +303,8 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
             registry = get_registry()
             await registry.broadcaster.unregister(meeting_id, participant_id)
             ingress = registry.ingress_for(meeting_id)
-            if ingress is not None:
-                ingress.submit(ParticipantLeft(participant_id=participant_id))
+            if ingress is not None and not ingress.submit(
+                ParticipantLeft(participant_id=participant_id)
+            ):
+                log.warning("ingress_leave_rejected", participant_id=participant_id)
             log.info("ws_disconnected", meeting_id=meeting_id, participant_id=participant_id)
