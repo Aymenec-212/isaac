@@ -1,13 +1,8 @@
-"""A WebSocket + msgpack transport to `moshi-server`.
+"""WebSocket/MessagePack framing for the pinned remote ASR protocol.
 
-**Never run against a real server.** That needs a CUDA host, which is Spike B2's
-blocker. The framing below follows `moshi-server`'s own client script; the
-protocol logic that uses it is unit-tested against a fake transport, but this
-file — the socket, the headers, the msgpack calls — is IMPLEMENTED and
-unverified, and `PROJECT_STATE.md` says so.
-
-Both `websockets` and `msgpack` are imported lazily so that a deployment
-running `fake` or `mlx` does not need either installed.
+R2 exercises this transport against a real localhost socket with a scripted peer.
+That verifies framing/auth headers, not NVIDIA inference. Optional dependencies
+remain lazy so fake/MLX development needs no remote-runtime packages.
 """
 
 from __future__ import annotations
@@ -38,9 +33,16 @@ class MoshiWebSocketTransport:
             ) from exc
         headers = {API_KEY_HEADER: self._api_key} if self._api_key else None
         try:
-            self._socket = await websockets.connect(self._url, additional_headers=headers)
+            self._socket = await websockets.connect(
+                self._url,
+                additional_headers=headers,
+                open_timeout=5,
+                close_timeout=1,
+                max_size=1_048_576,
+                max_queue=16,
+            )
         except Exception as exc:
-            raise TransportClosed(f"could not connect to {self._url}: {exc}") from exc
+            raise TransportClosed("could not connect to ASR endpoint") from exc
 
     async def send(self, message: Message) -> None:
         import msgpack
@@ -48,7 +50,9 @@ class MoshiWebSocketTransport:
         if self._socket is None:
             raise TransportClosed("send before connect")
         try:
-            await self._socket.send(msgpack.packb(message, use_bin_type=True))
+            await self._socket.send(
+                msgpack.packb(message, use_bin_type=True, use_single_float=True)
+            )
         except Exception as exc:
             raise TransportClosed(str(exc)) from exc
 
@@ -61,7 +65,10 @@ class MoshiWebSocketTransport:
             raw = await self._socket.recv()
         except Exception as exc:
             raise TransportClosed(str(exc)) from exc
-        decoded = msgpack.unpackb(raw, raw=False)
+        try:
+            decoded = msgpack.unpackb(raw, raw=False)
+        except (ValueError, TypeError, msgpack.exceptions.UnpackException) as exc:
+            raise TransportClosed("invalid ASR MessagePack") from exc
         if not isinstance(decoded, dict):
             raise TransportClosed(f"expected a msgpack map, got {type(decoded).__name__}")
         return decoded

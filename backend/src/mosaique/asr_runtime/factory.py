@@ -12,6 +12,7 @@ from mosaique.config.settings import Settings
 from mosaique.observability.logging import get_logger
 from mosaique.speech.adapters.fake import FakeRecognizer
 from mosaique.speech.adapters.kyutai import KyutaiRecognizer, MoshiServerBackend
+from mosaique.speech.adapters.kyutai.remote_recognizer import RemoteKyutaiRecognizer
 from mosaique.speech.interfaces import StreamingRecognizer
 
 log = get_logger(__name__)
@@ -46,7 +47,7 @@ def build_recognizer(settings: Settings) -> StreamingRecognizer:
         key = settings.asr_moshi_server_api_key
         quantization = settings.asr_moshi_server_quantization
         log.info("asr_runtime_selected", runtime="moshi_server", url=url)
-        return KyutaiRecognizer(
+        return RemoteKyutaiRecognizer(
             lambda: MoshiServerBackend(
                 MoshiWebSocketTransport(url, api_key=key),
                 quantization=quantization,

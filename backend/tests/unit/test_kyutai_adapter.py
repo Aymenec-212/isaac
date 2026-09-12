@@ -331,6 +331,7 @@ class FakeTransport:
     def __init__(self, inbound: list[Message] | None = None) -> None:
         self.sent: list[Message] = []
         self._inbound: asyncio.Queue[Message] = asyncio.Queue()
+        self._inbound.put_nowait({"type": "Ready"})
         for message in inbound or []:
             self._inbound.put_nowait(message)
         self.connects = 0
@@ -404,7 +405,7 @@ async def test_the_step_vad_signal_becomes_an_end_of_turn_event():
     becomes measurable, once a CUDA host exists (Spike B2).
     """
     backend, transport, seen = await moshi_backend()
-    transport.server_says({"type": "Step", "prs": [0.01, 0.02, 0.87]})
+    transport.server_says({"type": "Step", "prs": [0.01, 0.02, 0.87, 0.99]})
     await settle()
 
     assert [type(e) for e in seen] == [EndOfTurnEvent]
@@ -447,24 +448,16 @@ async def test_flush_sends_a_marker_and_waits_for_it_to_come_back():
     await backend.close()
 
 
-async def test_a_dropped_connection_is_retried_a_bounded_number_of_times():
+async def test_a_dropped_connection_requires_a_fresh_session_without_replay():
+    from mosaique.speech.adapters.kyutai.moshi_server import MoshiSessionError
+
     backend, transport, seen = await moshi_backend()
     transport.fail_sends = 1
-    await backend.push(b"\x00" * FRAME_PAYLOAD_BYTES)
-
-    assert transport.connects == 2  # the original, plus one reconnect
-    assert [m["type"] for m in transport.sent] == ["Audio"]
-    assert seen == []
-    await backend.close()
-
-
-async def test_a_stream_that_cannot_reconnect_says_so_instead_of_going_quiet():
-    """Once the bounded schedule is spent the runtime has to hear about it, so
-    it can mark the stream unavailable and keep recording audio (spec 8.4)."""
-    backend, transport, seen = await moshi_backend()
-    transport.fail_sends = 99
-    await backend.push(b"\x00" * FRAME_PAYLOAD_BYTES)
-
+    with pytest.raises(MoshiSessionError, match="fresh session"):
+        await backend.push(FRAME)
+    assert transport.connects == 1
+    assert transport.closed
+    assert transport.sent == []
     assert [e.code for e in seen] == ["ASR_UNAVAILABLE"]
     assert seen[0].fatal
     await backend.close()
