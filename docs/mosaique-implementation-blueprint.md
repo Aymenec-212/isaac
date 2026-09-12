@@ -1,5 +1,14 @@
 # Mosaïque — Final Implementation Blueprint
 
+> **Current amendment — 2026-09-12:** [Two-user voice / Azure ASR architecture](two-user-cloud-architecture.md)
+> records the maintainer's new priority and supersedes companion-only D-01/ADR-01,
+> the WebRTC exclusion and older single-user-first sequencing where they conflict.
+> Direct WebRTC/TURN carries voice; the existing PCM WebSocket and ASR seams remain.
+> Work proceeds one slice, one documented PR, review/merge, then the next slice.
+> R0 is documentation only; deployment review is pending and no new feature or
+> infrastructure is claimed implemented. Historical text below retains its original
+> evidence; use the root PROJECT_STATE.md and the R0 sequence for current next work.
+
 **Version:** 1.2 (scope restored)
 **Date:** 2026-09-03
 **Status:** Reconciliation layer over the Technical Specification. Not a replacement for it.
