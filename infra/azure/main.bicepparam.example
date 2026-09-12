@@ -1,0 +1,4 @@
+using './main.bicep'
+param operatorCidr = 'REPLACE_WITH_OPERATOR_IPV4/32'
+param sshPublicKey = 'REPLACE_WITH_PUBLIC_SSH_KEY'
+param ubuntuImageVersion = '24.04.202607280'

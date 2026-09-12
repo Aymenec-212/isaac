@@ -1,10 +1,14 @@
 # PROJECT_STATE.md
 
 **Project:** Mosaïque — realtime meeting intelligence, French-first
-**Last updated:** 2026-09-12 (rev 25 — two-user voice / remote ASR architecture specified)
-**Updated by:** Codex, R0 documentation slice
-**Current slice:** **R0 — two-user voice and Azure ASR architecture. SPECIFIED;
-deployment review pending. No application or infrastructure implementation in R0.**
+**Last updated:** 2026-09-12 (rev 26 — R1 deployment configuration; Azure GPU blocked)
+**Updated by:** Codex, R1 deployment slice
+**Current slice:** **R1 — configuration prepared for review, not deployed.**
+R0 merged in PR #19 (`9bb417a`). Bicep, pinned GPU image/model inputs, Compose,
+secret/model helpers and the [deployment runbook](docs/r1-azure-deployment.md)
+are implemented on the R1 branch. No application feature or Azure resource was
+created. **West Europe T4 SKU reports NotAvailableForSubscription**; hardware
+validation cannot proceed under the current subscription.
 
 **Current priority:** two remote participants hear each other through Mosaïque,
 stream separate microphones into real concurrent Rust `moshi-server` ASR, see
@@ -14,8 +18,8 @@ available credit, and continued voice with a warning during ASR outages.
 
 **Start at [the architecture and PR sequence](docs/two-user-cloud-architecture.md),
 then §12 below.** One slice → one documented PR → maintainer review/merge → next
-slice. R0 changes documentation only and stops for review. The implementation
-baseline inspected was `92f2219` (PR #18). Existing local dependency/build-state
+slice. Review/merge R1 and resolve feasibility before R2. The R1 baseline
+is `9bb417a` (merged PR #19). Existing local dependency/build-state
 changes and untracked `scripts/` are outside this slice.
 
 This explicitly supersedes companion-only D-01/ADR-01 and the earlier instruction
@@ -32,8 +36,17 @@ enabled subscription named Microsoft Azure Sponsorship despite the stated free
 trial; empty West Europe quota results leave eligibility unconfirmed. See the
 architecture document for source gaps, commands, prices and remaining gates.
 
+**R1 evidence (2026-09-12):** Bicep 0.44.1 compilation, Compose 5.0.2 config
+validation and five deployment-helper tests passed. Image build, host driver
+setup, Azure validate/what-if and real ASR remain unverified. Docker Desktop was
+manually paused; no GPU deployment or runtime test was attempted. The runbook
+records immutable inputs, cost estimate and operational gates. Backend units:
+305 passed / 94 deselected; frontend: 91 passed, typecheck/build passed. Backend
+ruff/format pass; mypy reports eight existing MLX adapter errors in unchanged
+code (99 source files checked). Database integration was not rerun with Docker paused.
+
 **Historical context below:** earlier phase/priority instructions are retained as
-history and superseded by this header and §12's R0 entry wherever they conflict.
+history and superseded by this header and §12's R1 entry wherever they conflict.
 
 **Why 6R exists.** PR #14 validated on the M1 and the review experience was the
 next thing named: *"before moving on to the two users and serving the ASR model on
@@ -162,8 +175,8 @@ about **two real streams at once**, which MLX cannot do at all (L-26).
 | Tests passing | **516, and the current numbers are the M1's own as of 2026-09-10: backend `398 passed, 1 deselected`, frontend `91 passed`, 19 Playwright browser specs, typecheck and build clean, migration `0002` applied cleanly against a real database.** Composition: 305 backend unit, 93 backend integration and realtime (real PostgreSQL), 91 frontend unit, 19 browser specs, plus one opt-in accelerated hour behind `-m slow`. *The history below is kept because each rev's number is what was true then; read the sentence above for what is true now.* **Re-run by Aymen on his M1, 2026-09-08 — all green.** Backend `380 passed, 1 deselected`, matching this sandbox exactly; measured-timing and reconnect/idle/health subsets green; frontend `72 passed`; PostgreSQL healthy in Docker; **`/readyz` ready with MLX weights and database healthy**; frontend serving on `127.0.0.1:5173`. `npm run build` clean. **Rev 19 adds two, in this sandbox on Linux:** backend `382 passed, 1 deselected in 104.73s` with `tests/integration/test_full_lifecycle.py`, frontend `72 passed` and `npm run build` clean, unchanged because no frontend file was touched. The accelerated hour still passes behind `-m slow` — `1 passed, 382 deselected in 70.58s`. **Rev 20 re-ran the browser suite in this sandbox and it is now 8 specs, all passing** — the 2 pre-existing ones included, since `App.tsx` and `MeetingList.tsx` both changed. Frontend unit 72 -> 79. **Rev 22 takes it to 91 unit and 14 browser specs**, the 6 new ones in `e2e/review.spec.ts`; the backend is untouched by 6R so far and stays at `382 passed, 1 deselected`. **Rev 23 takes the backend to `398 passed, 1 deselected`** with `test_segment_corrections.py` (16) and the browser suite to 19 with `e2e/corrections.spec.ts` (5). **Rev 24 is the M1 re-run of all of it, by Aymen on 2026-09-10: backend `398 passed, 1 deselected`, frontend `91 passed`, typecheck and production build clean, 19 browser specs, and migration `0002` applied cleanly against his database.** The sandbox and the M1 now agree on 398, which — with no CI (L-18) — is the only cross-check this project has, and the first time the M1 has produced the current number rather than a stale one. **None of these executes a model or a provider**: the ASR evidence is a report (L-27) and the LLM's numbers have never been counted (L-31) |
 | Lint / types | ruff clean; ruff format clean (**147** files); mypy strict clean on **99** source files; `tsc --noEmit` clean; `openapi.json` regenerated with no drift (**12** paths — `PATCH /meetings/{id}/segments/{id}` and `POST /meetings/{id}/outputs/regenerate` are the two new ones). *Counts re-read in rev 23; the 97/144/10 they replace were rev 19's and grew with item 7. Re-read them rather than trusting this line — with no CI, drift here is silent* |
 | Known gap | A-8 unvalidated: every run so far is loopback on one machine. Spike A not run. A-3, A-16 and `moshi_server` all still need a CUDA host. **No CI runs on this repository** — see L-18, which now also means the one run that proves Slice 4 is reproducible only by hand, on hardware. |
-| Next action | **Review R0**, the documentation-only two-user architecture PR. After merge, R1 specifies reproducible Azure/GPU deployment and resolves subscription/quota/cost feasibility before provisioning. See `docs/two-user-cloud-architecture.md` §7. |
-| Next gate | **R0 documentation review**, then the R1 feasibility/configuration gate. The overall two-user gate is a real 30-minute cross-network WebRTC call with two concurrent Rust ASR streams and persisted, reviewable Slice 5 outputs. **Not implemented or verified.** Prior Slice 6R evidence remains unchanged. |
+| Next action | **Review R1** configuration and `docs/r1-azure-deployment.md`; resolve West Europe T4 subscription restriction and credit eligibility before provisioning/R2 hardware work. |
+| Next gate | **R1 configuration review and unresolved feasibility gate.** The overall two-user gate is a real 30-minute cross-network WebRTC call with two concurrent Rust ASR streams and persisted, reviewable Slice 5 outputs. **Not implemented or verified.** Prior Slice 6R evidence remains unchanged. |
 
 ---
 
@@ -528,6 +541,7 @@ Current, as of planning. Each is a deliberate choice, not an oversight.
 
 | Date | Change |
 |---|---|
+| 2026-09-12 | **rev 26 / R1.** Add two-host Bicep, pinned CUDA/Rust/model configuration, private ASR Compose, secret and checksum helpers, five offline tests and deployment/rollback runbook. Bicep compilation and Compose validation passed. West Europe T4 is NotAvailableForSubscription; no resources provisioned, image built or real ASR verified. R0 merged in PR #19. |
 | 2026-09-12 | **rev 25 / R0 — documentation only.** Specify two-user in-product voice via direct WebRTC/TURN, independent PCM transcription through remote Rust Kyutai, and a two-host Azure candidate. Record the maintainer’s carrier/outage decisions, subscription/quota uncertainty, measured retail estimates, current-code gaps, exact acceptance protocol and one-slice/one-PR workflow. Supersede older single-user-first sequencing without erasing its evidence. Planning-pass checks (2026-09-11): backend unit 305 passed / 94 deselected; frontend 91 passed; typecheck passed. No new model, cloud or remote-call verification; deployment review pending. |
 | 2026-09-10 | **rev 24. Slice 6R validated on the M1 and merged as PR #16. Documentation only — no code changed.** Aymen ran the whole thing on Apple silicon: migration `0002` applied cleanly against his database, backend **`398 passed, 1 deselected`**, frontend `91 passed`, typecheck and production build clean, the 5 correction browser specs and all **19** Playwright specs green. **That the M1 and the sandbox now agree on 398 is the whole cross-check this project has** — there is no CI (L-18), so two machines producing the same number is the substitute, and it is the first time since rev 18 that the M1 has produced the *current* number rather than a stale one. Then the half no suite can reach: a full manual meeting on **real MLX Kyutai + OpenAI `gpt-4o-mini`**, `/readyz` green on all three dependencies, a real French transcript that read as speaker-turn paragraphs, real intelligence generated, **and the correction path exercised on that real transcript** — which closes the one gap PR #16 shipped with, that corrections had never met a real ASR error. **What this rev refuses to round up:** that pass is a sentence, not an artefact. Slice 4 left a JSON report; this left none, nothing re-runs it, and it does not itemize which correction behaviours were exercised — notably whether **Régénérer** was pressed against the real provider. Recorded as **L-41** rather than absorbed, because "validated on M1" is exactly the phrase that gets cited later for things it never covered. Also corrected here: two limitation rows that had quietly gone false — **L-5** ("no transcript editing") which item 7 reversed, and **L-9** ("search is ILIKE") which rev 16 reversed and nobody amended. §1's lint counts re-read (147 files, 99 modules, 12 OpenAPI paths). Phase A now has exactly one item left in it, the §15 metrics, and it is unstarted |
 | 2026-09-10 | **rev 23. Slice 6R item 7: transcript corrections, and the slice closes.** Aymen validated items 1–6 on his M1 — 91 frontend unit, 382 backend, 14 browser specs, plus a real MLX/OpenAI meeting whose transcript read as speaker-grouped paragraphs with citations, search and timestamps all working — and then specified item 7 concretely, which **answered the question this slice had deliberately left open**: correcting a cited segment neither leaves the summary alone nor silently re-runs it. It marks it *à revoir* and offers one button. Five corrections cost one LLM call, not five, and `test_correcting_does_not_re_run_the_summary_by_itself` asserts that absence. **The storage shape is the part that matters.** Migration `0002` adds four nullable columns to `transcript_segments`; `text` and `words` are never written again, and a correction lands in `corrected_text` / `corrected_participant_id` beside them. That is Q9's "additive only" made structural rather than remembered — L-28's shape, the 1.43% WER and every `[measure]` row in §8 are claims about what the *model* said, and an overwriting edit would leave no way to tell an edit from a transcription. The test that guards it reads the **row**, not the route: presenting a correction correctly proves nothing about what was stored. **One design decision did most of the work.** "What this segment says" now has exactly one definition, in `transcript/corrections.py`, because it has three consumers: the review page, `?q=` search, and the summarizer's prompt. It lives in `transcript/` rather than beside the API because `jobs/` and `intelligence/` may not import a transport (D-04). Without it the prompt would have kept reading raw text — a summary of words the reader can no longer see, which is L-35's shape one layer down. `mypy` found the first half of that: `search()` was typed against the ORM row, and following the error surfaced the real bug — searching stored text while displaying corrected text returns offsets that index a string nobody can see. `search()` is now generic and the route searches the *presented* segments. **The browser test found a second real bug, in my own code.** `GET /outputs` returns the still-valid v1 summary with status `succeeded`, so polling on status alone exited instantly and the page sat on v1 after regenerating. The exit condition is the version handshake, not the status. Backend 382 -> 398, browser specs 14 -> 19; ruff, ruff format, mypy strict (99 files) clean; `openapi.json` regenerated, 10 -> 12 paths. One error code added, `VALIDATION_FAILED` -> 400, because reusing `AUDIO_INVALID_FRAME` for a rejected text edit would make the taxonomy lie. **Two limitations recorded rather than smoothed:** L-39, only the raw text and the *latest* correction are kept, so a second edit overwrites the first — deliberate, since "keep it small" ruled out the revision history a correction table would exist to show; and L-40, timestamps stay uncorrectable because FR-11's seek arithmetic is derived from them and a typed number would play the wrong moment convincingly. **Slice 6R is complete.** 6A's §15 metrics are the last Phase A item. |
@@ -563,12 +577,13 @@ Written so a cold session can start without re-deriving anything. This section
 describes **intent**, unlike the rest of this file; when it disagrees with the
 tables above, the tables are right.
 
-### START HERE — R0 review, then one slice per PR (2026-09-12)
+### START HERE — R1 review and feasibility (2026-09-12)
 
-R0 records the architecture and stops at a documentation PR. Review/merge it
-before R1 (reproducible Azure/GPU configuration and feasibility). Follow the
+R0 is merged as PR #19. R1 supplies configuration and a runbook; review/merge
+its PR and resolve the recorded Azure restriction before real GPU validation.
+Follow the
 ordered gates in [the architecture document](docs/two-user-cloud-architecture.md#7-slice-by-slice-pr-sequence).
-Do not provision during R0 or automatically merge a PR. Each later PR explains
+Do not provision while R1 feasibility is blocked or automatically merge a PR. Each later PR explains
 the problem/result, scope, contracts, exact evidence/environment, limitations,
 migration/rollback and next slice; update this state file at its gate.
 
