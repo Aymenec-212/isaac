@@ -32,6 +32,8 @@ class MeetingRegistry:
         self._ingresses: dict[str, BrowserWebSocketIngress] = {}
         self._lock = asyncio.Lock()
         self._finalizing: dict[str, asyncio.Task[str | None]] = {}
+        self._flush_waiters: dict[str, set[str]] = {}
+        self._flush_events: dict[str, asyncio.Event] = {}
 
     @property
     def recognizer(self) -> StreamingRecognizer:
@@ -82,6 +84,35 @@ class MeetingRegistry:
 
     def get(self, meeting_id: str) -> MeetingRuntime | None:
         return self._runtimes.get(meeting_id)
+
+    def begin_flush(self, meeting_id: str, participants: set[str]) -> None:
+        self._flush_waiters[meeting_id] = set(participants)
+        event = asyncio.Event()
+        self._flush_events[meeting_id] = event
+        if not participants:
+            event.set()
+
+    def acknowledge_flush(self, meeting_id: str, participant_id: str) -> None:
+        waiting = self._flush_waiters.get(meeting_id)
+        if waiting is None:
+            return
+        waiting.discard(participant_id)
+        if not waiting:
+            self._flush_events[meeting_id].set()
+
+    async def wait_for_flush(self, meeting_id: str, timeout_s: float = 2.0) -> bool:
+        event = self._flush_events.get(meeting_id)
+        if event is None:
+            return True
+        try:
+            async with asyncio.timeout(timeout_s):
+                await event.wait()
+            return True
+        except TimeoutError:
+            return False
+        finally:
+            self._flush_waiters.pop(meeting_id, None)
+            self._flush_events.pop(meeting_id, None)
 
     async def finalize(self, meeting_id: str) -> str | None:
         """Drain the runtime and report what produced its words.

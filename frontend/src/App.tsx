@@ -131,6 +131,7 @@ export default function App() {
               joined={view.joined}
               isHost={view.joined.can_manage}
               onEnded={() => openReview(view.joined.meeting.id)}
+              onLeft={goToList}
             />
           ) : !authenticated && !(view.name === "review" && meetingCredentials.get(view.meetingId)) ? (
             <TokenGate onReady={() => setAuthenticated(true)} />

@@ -6,6 +6,7 @@ import {
   type ConnectionState,
   type StreamState,
 } from "../realtime/client";
+import { WebRTCVoice, type VoiceState } from "../realtime/webrtc";
 import { SilenceWatcher } from "../realtime/silence";
 import { TranscriptReconciler, type TranscriptEntry } from "../realtime/reconciler";
 import { ParticipantRoster, type RosterEntry } from "../realtime/roster";
@@ -33,10 +34,12 @@ export function LiveMeeting({
   joined,
   isHost,
   onEnded,
+  onLeft,
 }: {
   joined: JoinResponse;
   isHost: boolean;
   onEnded: () => void;
+  onLeft: () => void;
 }) {
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [participants, setParticipants] = useState<RosterEntry[]>([]);
@@ -48,15 +51,30 @@ export function LiveMeeting({
   const [stream, setStream] = useState<StreamState | null>(null);
   const [lagMs, setLagMs] = useState(0);
   const [ending, setEnding] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [playbackBlocked, setPlaybackBlocked] = useState(false);
 
   const reconciler = useRef(new TranscriptReconciler());
   const roster = useRef(new ParticipantRoster());
   const silence = useRef(new SilenceWatcher());
   const client = useRef<MeetingClient | null>(null);
   const capture = useRef<MicrophoneCapture | null>(null);
+  const voice = useRef<WebRTCVoice | null>(null);
+  const remoteAudio = useRef<HTMLAudioElement | null>(null);
 
   const meetingId = joined.meeting.id;
   const sessionToken = joined.session_token;
+
+  useEffect(() => {
+    const audio = remoteAudio.current;
+    if (!audio) return;
+    audio.srcObject = remoteStream;
+    if (remoteStream) {
+      void audio.play().then(() => setPlaybackBlocked(false)).catch(() => setPlaybackBlocked(true));
+    }
+  }, [remoteStream]);
 
   useEffect(() => {
     const meetingClient = new MeetingClient(meetingId, sessionToken, {
@@ -65,6 +83,8 @@ export function LiveMeeting({
       },
       onRoster: (message) => {
         if (roster.current.apply(message)) setParticipants(roster.current.ordered());
+        if (message.type === "participant.joined") voice.current?.participantJoined(message.participant_id);
+        if (message.type === "participant.left") voice.current?.participantLeft(message.participant_id);
       },
       onStreamStatus: (status, lag) => {
         setStream(status);
@@ -72,6 +92,7 @@ export function LiveMeeting({
       },
       onHelloOk: (participantId, resumed) => {
         setSelfId(participantId);
+        voice.current?.setSelfId(participantId);
         {
           // Tech spec 7.3: anything finalized while we were away is not coming
           // back over the socket, so ask for it. Duplicates are harmless — the
@@ -106,6 +127,7 @@ export function LiveMeeting({
         mic
           .start({
             onFrame: (pcm) => meetingClient.sendAudio(pcm),
+            onStream: (stream) => voice.current?.setLocalStream(stream),
             onLevel: (value) => {
               setLevel(value);
               if (silence.current.observe(value, Date.now())) setNoAudio(true);
@@ -127,6 +149,7 @@ export function LiveMeeting({
         }
       },
       onConnectionState: setConnection,
+      onSignal: (message) => { void voice.current?.handleSignal(message); },
       onError: (code, message) => {
         if (code === "SESSION_REPLACED" || code === "MEETING_NOT_LIVE") {
           void capture.current?.stop();
@@ -141,18 +164,36 @@ export function LiveMeeting({
         setMicError(`${code} — ${message}`);
       },
     });
+    voice.current = new WebRTCVoice({
+      sendSignal: (message) => meetingClient.sendSignal(message),
+      onRemoteStream: setRemoteStream,
+      onState: setVoiceState,
+    });
     client.current = meetingClient;
     meetingClient.connect();
+    void api.iceConfig(meetingId).then((config) => {
+      voice.current?.setIceServers(config.ice_servers.map((server) => ({
+        urls: server.urls,
+        ...(server.username ? { username: server.username } : {}),
+        ...(server.credential ? { credential: server.credential } : {}),
+      })));
+    }).catch(() => {
+      voice.current?.setIceServers([]);
+      setMicError("Voix directe indisponible — la transcription peut continuer.");
+    });
 
     return () => {
       void capture.current?.stop();
+      voice.current?.close();
       meetingClient.close();
     };
   }, [meetingId, sessionToken, onEnded]);
 
   const end = useCallback(async () => {
     setEnding(true);
+    await client.current?.flush();
     await capture.current?.stop();
+    voice.current?.close();
     try {
       await api.endMeeting(meetingId);
       onEnded();
@@ -162,6 +203,22 @@ export function LiveMeeting({
       setEnding(false);
     }
   }, [meetingId, onEnded]);
+
+  const toggleMute = useCallback(() => {
+    const next = !muted;
+    setMuted(next);
+    capture.current?.setMuted(next);
+    voice.current?.setMuted(next);
+    client.current?.setPaused(next);
+  }, [muted]);
+
+  const leave = useCallback(() => {
+    void client.current?.flush();
+    void capture.current?.stop();
+    voice.current?.close();
+    client.current?.close();
+    onLeft();
+  }, [onLeft]);
 
   return (
     <>
@@ -175,6 +232,8 @@ export function LiveMeeting({
             {ending ? "Finalisation…" : "Terminer la réunion"}
           </button>
         )}
+        <button className="btn-quiet" onClick={toggleMute}>{muted ? "Réactiver le micro" : "Couper le micro"}</button>
+        <button className="btn-quiet" onClick={leave}>Quitter</button>
       </div>
 
       <ParticipantPanel entries={participants} selfId={selfId} />
@@ -189,7 +248,15 @@ export function LiveMeeting({
         <span className="meter" aria-label="Niveau du micro">
           <span className="meter-fill" style={{ width: `${Math.min(100, level * 180)}%` }} />
         </span>
+        <span className="state">Voix : {voiceState === "connected" ? "connectée" : voiceState === "failed" ? "indisponible" : voiceState === "idle" ? "en attente" : "connexion…"}</span>
       </div>
+
+      <audio ref={remoteAudio} autoPlay controls aria-label="Audio de l'autre participant" />
+      {playbackBlocked && (
+        <button className="btn-quiet" onClick={() => void remoteAudio.current?.play().then(() => setPlaybackBlocked(false))}>
+          Activer le son de l'autre participant
+        </button>
+      )}
 
       {micError && (
         <div className="notice" role="alert">

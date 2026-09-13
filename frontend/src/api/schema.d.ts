@@ -135,6 +135,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/meetings/{meeting_id}/ice-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ice Config
+         * @description Return direct/STUN and expiring TURN credentials for an authorized peer.
+         */
+        get: operations["get_ice_config_meetings__meeting_id__ice_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/meetings/{meeting_id}/end": {
         parameters: {
             query?: never;
@@ -425,6 +445,28 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /**
+         * IceConfigResponse
+         * @description Short-lived ICE servers for one authorized meeting (R5).
+         */
+        IceConfigResponse: {
+            /** Ice Servers */
+            ice_servers: components["schemas"]["IceServer"][];
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** IceServer */
+        IceServer: {
+            /** Urls */
+            urls: string[];
+            /** Username */
+            username?: string | null;
+            /** Credential */
+            credential?: string | null;
         };
         /** JoinRequest */
         JoinRequest: {
@@ -948,6 +990,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JoinResponse"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not permitted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_ice_config_meetings__meeting_id__ice_config_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IceConfigResponse"];
                 };
             };
             /** @description Missing or invalid token */

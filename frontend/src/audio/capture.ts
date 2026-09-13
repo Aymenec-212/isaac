@@ -8,12 +8,14 @@
 export interface CaptureHandlers {
   onFrame: (pcm: ArrayBuffer) => void;
   onLevel: (level: number) => void;
+  onStream?: (stream: MediaStream) => void;
 }
 
 export class MicrophoneCapture {
   private context: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private node: AudioWorkletNode | null = null;
+  private muted = false;
 
   async start(handlers: CaptureHandlers): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({
@@ -24,6 +26,7 @@ export class MicrophoneCapture {
         autoGainControl: true,
       },
     });
+    handlers.onStream?.(this.stream);
 
     this.context = new AudioContext();
     await this.context.audioWorklet.addModule("/audio-worklet.js");
@@ -32,7 +35,7 @@ export class MicrophoneCapture {
     this.node = new AudioWorkletNode(this.context, "mosaique-capture");
     this.node.port.onmessage = (event) => {
       const data = event.data as { type: string; pcm?: ArrayBuffer; value?: number };
-      if (data.type === "frame" && data.pcm) handlers.onFrame(data.pcm);
+      if (data.type === "frame" && data.pcm && !this.muted) handlers.onFrame(data.pcm);
       else if (data.type === "level" && data.value !== undefined) handlers.onLevel(data.value);
     };
     source.connect(this.node);
@@ -44,6 +47,11 @@ export class MicrophoneCapture {
     silentOutput.connect(this.context.destination);
   }
 
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    this.stream?.getAudioTracks().forEach((track) => { track.enabled = !muted; });
+  }
+
   async stop(): Promise<void> {
     this.node?.port.close();
     this.node?.disconnect();
@@ -52,5 +60,6 @@ export class MicrophoneCapture {
     this.context = null;
     this.stream = null;
     this.node = null;
+    this.muted = false;
   }
 }

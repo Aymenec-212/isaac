@@ -33,7 +33,18 @@ from mosaique.realtime.ingress import (
 )
 from mosaique.realtime.ingress.interfaces import IngressAudioFrame, IngressEvent
 from mosaique.realtime.protocol.frames import FrameRejection, InvalidFrame, decode_frame
-from mosaique.realtime.protocol.messages import ErrorMessage, Hello, HelloOk, Ping, Pong
+from mosaique.realtime.protocol.messages import (
+    AudioFlush,
+    ErrorMessage,
+    Hello,
+    HelloOk,
+    Ping,
+    Pong,
+    RTCAnswer,
+    RTCForward,
+    RTCIceCandidate,
+    RTCOffer,
+)
 from mosaique.realtime.runtime_state import get_registry, is_draining
 
 log = get_logger(__name__)
@@ -282,12 +293,61 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                 continue
 
             if (text := message.get("text")) is not None:
-                payload = json.loads(text)
+                try:
+                    payload = json.loads(text)
+                except json.JSONDecodeError:
+                    await websocket.send_json(
+                        ErrorMessage(
+                            code="CONTROL_INVALID", message="Invalid JSON", fatal=False
+                        ).model_dump()
+                    )
+                    continue
                 kind = payload.get("type")
                 if kind == "ping":
                     await websocket.send_json(Pong(t=payload.get("t", _now_ms())).model_dump())
                 elif kind == "pong":
                     pass  # `liveness.seen()` above already recorded it
+                elif kind == "audio.flush":
+                    flush = AudioFlush.model_validate(payload)
+                    registry.acknowledge_flush(meeting_id, participant_id)
+                    await websocket.send_json(
+                        {"type": "audio.flush.ok", "last_sequence": flush.last_sequence}
+                    )
+                elif kind in ("rtc.offer", "rtc.answer", "rtc.ice"):
+                    signal: RTCOffer | RTCAnswer | RTCIceCandidate
+                    if kind == "rtc.offer":
+                        signal = RTCOffer.model_validate(payload)
+                    elif kind == "rtc.answer":
+                        signal = RTCAnswer.model_validate(payload)
+                    else:
+                        signal = RTCIceCandidate.model_validate(payload)
+                    if signal.target_participant_id == participant_id:
+                        await websocket.send_json(
+                            ErrorMessage(
+                                code="SIGNAL_INVALID_TARGET",
+                                message="A peer signal cannot target its sender",
+                                fatal=False,
+                            ).model_dump()
+                        )
+                        continue
+                    forwarded = RTCForward(
+                        type=signal.type,
+                        from_participant_id=participant_id,
+                        sdp=getattr(signal, "sdp", None),
+                        candidate=getattr(signal, "candidate", None),
+                        sdp_mid=getattr(signal, "sdp_mid", None),
+                        sdp_m_line_index=getattr(signal, "sdp_m_line_index", None),
+                    ).model_dump(exclude_none=True)
+                    if not await registry.broadcaster.send_to_meeting(
+                        meeting_id, signal.target_participant_id, forwarded
+                    ):
+                        await websocket.send_json(
+                            ErrorMessage(
+                                code="SIGNAL_TARGET_UNAVAILABLE",
+                                message="The other participant is not connected",
+                                fatal=False,
+                            ).model_dump()
+                        )
                 elif kind in ("audio.pause", "audio.resume"):  # noqa: SIM102
                     # Tech spec 7.1: the session stays, the server just stops
                     # expecting frames. Without this a mute is indistinguishable
@@ -302,7 +362,7 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                     ):
                         break
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, ValidationError, ValueError):
         pass
     except Exception as exc:
         log.error("ws_failed", error_type=type(exc).__name__)

@@ -76,6 +76,19 @@ class JoinResponse(BaseModel):
     meeting: MeetingView
 
 
+class IceServer(BaseModel):
+    urls: list[str]
+    username: str | None = None
+    credential: str | None = None
+
+
+class IceConfigResponse(BaseModel):
+    """Short-lived ICE servers for one authorized meeting (R5)."""
+
+    ice_servers: list[IceServer]
+    expires_at: datetime
+
+
 class SegmentView(BaseModel):
     """One segment as the review page should show it.
 
