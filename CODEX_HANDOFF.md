@@ -1,5 +1,7 @@
 # CODEX_HANDOFF.md
 
+**Fresh session:** read [the current transfer notes](docs/NEXT_SESSION_HANDOFF.md) first. R4 is [PR #23](https://github.com/Aymenec-212/isaac/pull/23); check merge state before R5.
+
 > **Current amendment — 2026-09-12:** [Two-user voice / Azure ASR architecture](docs/two-user-cloud-architecture.md)
 > records the maintainer's new priority and supersedes companion-only D-01/ADR-01,
 > the WebRTC exclusion and older single-user-first sequencing where they conflict.

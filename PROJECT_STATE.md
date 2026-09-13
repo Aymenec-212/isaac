@@ -1,5 +1,7 @@
 # PROJECT_STATE.md
 
+**Fresh session:** read [the current transfer notes](docs/NEXT_SESSION_HANDOFF.md) first. R4 is [PR #23](https://github.com/Aymenec-212/isaac/pull/23); check merge state before R5.
+
 **Project:** Mosaïque — realtime meeting intelligence, French-first
 **Last updated:** 2026-09-13 (rev 29 — R4 identity and guest review)
 **Updated by:** Codex, R4 identity slice
