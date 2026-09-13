@@ -6,7 +6,11 @@ in Slice 1 against this same router.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import base64
+import hashlib
+import hmac
+import secrets
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -23,6 +27,8 @@ from mosaique.app.api.schemas import (
     EndMeetingResponse,
     ErrorEnvelope,
     EvidenceItem,
+    IceConfigResponse,
+    IceServer,
     JoinRequest,
     JoinResponse,
     MeetingDetailView,
@@ -227,6 +233,42 @@ async def join_meeting(
     )
 
 
+@router.get(
+    "/{meeting_id}/ice-config",
+    response_model=IceConfigResponse,
+    response_model_exclude_none=True,
+)
+async def get_ice_config(
+    meeting_id: str, principal: PrincipalDep, session: SessionDep, settings: SettingsDep
+) -> IceConfigResponse:
+    """Return direct/STUN and expiring TURN credentials for an authorized peer."""
+    if not is_valid_id(meeting_id):
+        raise NotFound()
+    repo = MeetingRepository(session, principal.organization_id)
+    authorize_meeting_access(principal, await repo.get(meeting_id))
+
+    now = datetime.now(UTC)
+    expires_at = now + timedelta(seconds=settings.webrtc_ice_credential_ttl_s)
+    servers = [IceServer(urls=list(settings.webrtc_stun_urls))] if settings.webrtc_stun_urls else []
+    if settings.webrtc_turn_urls:
+        if not settings.webrtc_turn_shared_secret:
+            raise MosaiqueError(
+                ErrorCode.INTERNAL_ERROR, "TURN is configured without a shared secret"
+            )
+        username = f"{int(expires_at.timestamp())}:{secrets.token_urlsafe(12)}"
+        digest = hmac.new(
+            settings.webrtc_turn_shared_secret.encode(), username.encode(), hashlib.sha1
+        ).digest()
+        servers.append(
+            IceServer(
+                urls=list(settings.webrtc_turn_urls),
+                username=username,
+                credential=base64.b64encode(digest).decode("ascii"),
+            )
+        )
+    return IceConfigResponse(ice_servers=servers, expires_at=expires_at)
+
+
 @router.post("/{meeting_id}/end", response_model=EndMeetingResponse)
 async def end_meeting(
     meeting_id: str, principal: PrincipalDep, session: SessionDep
@@ -254,6 +296,19 @@ async def end_meeting(
     await session.commit()
 
     try:
+        registry = get_registry()
+        expected_flush = registry.broadcaster.connected_participants(meeting_id)
+        registry.begin_flush(meeting_id, expected_flush)
+        await registry.broadcaster.publish(
+            meeting_id, {"type": "meeting.end_requested", "deadline_ms": 2000}
+        )
+        flush_complete = await registry.wait_for_flush(meeting_id)
+        log.info(
+            "meeting_input_flushed",
+            meeting_id=meeting_id,
+            expected=len(expected_flush),
+            complete=flush_complete,
+        )
         asr_version = await get_registry().finalize(meeting_id)
     except Exception:
         meeting.state = str(MeetingState.FAILED)

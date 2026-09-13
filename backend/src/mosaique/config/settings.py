@@ -43,6 +43,13 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
+    # R5 WebRTC ICE. TURN credentials are minted per request; the shared
+    # secret and private server configuration never leave the app process.
+    webrtc_stun_urls: list[str] = Field(default_factory=list)
+    webrtc_turn_urls: list[str] = Field(default_factory=list)
+    webrtc_turn_shared_secret: str | None = None
+    webrtc_ice_credential_ttl_s: int = Field(default=3600, ge=60, le=86400)
+
     # Raw per-participant PCM (ADR-06). Retention policy is still open (Q3).
     audio_root: Path = Path("audio")
 

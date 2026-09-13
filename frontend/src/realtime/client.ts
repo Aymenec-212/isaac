@@ -26,7 +26,13 @@ export interface MeetingClientHandlers {
   onConnectionState: (state: ConnectionState) => void;
   onStreamStatus: (status: StreamState, lagMs: number) => void;
   onError: (code: string, message: string) => void;
+  onSignal?: (message: RTCSignal) => void;
 }
+
+export type RTCSignal =
+  | { type: "rtc.offer"; from_participant_id: string; sdp: string }
+  | { type: "rtc.answer"; from_participant_id: string; sdp: string }
+  | { type: "rtc.ice"; from_participant_id: string; candidate: string; sdp_mid?: string; sdp_m_line_index?: number };
 
 export class MeetingClient {
   private socket: WebSocket | null = null;
@@ -40,6 +46,8 @@ export class MeetingClient {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly buffer = new FrameBuffer();
+  private inputClosed = false;
+  private flushWaiter: { resolve: (value: boolean) => void; timer: ReturnType<typeof setTimeout> } | null = null;
 
   constructor(
     private readonly meetingId: string,
@@ -101,6 +109,21 @@ export class MeetingClient {
         case "meeting.state":
           this.handlers.onMeetingState(message.state);
           break;
+        case "meeting.end_requested":
+          void this.flush();
+          break;
+        case "audio.flush.ok":
+          if (this.flushWaiter) {
+            clearTimeout(this.flushWaiter.timer);
+            this.flushWaiter.resolve(true);
+            this.flushWaiter = null;
+          }
+          break;
+        case "rtc.offer":
+        case "rtc.answer":
+        case "rtc.ice":
+          this.handlers.onSignal?.(message as RTCSignal);
+          break;
         case "ping":
           // The server decides a silent socket is dead after 30 s, so this
           // answer is what keeps a listening-only participant connected.
@@ -155,6 +178,7 @@ export class MeetingClient {
   }
 
   sendAudio(pcm: ArrayBuffer): void {
+    if (this.inputClosed) return;
     const sequence = this.sequence++;
     if (!this.readyForAudio || this.socket?.readyState !== WebSocket.OPEN) {
       // Offline: hold it. The sequence still advances, so what we send when we
@@ -170,6 +194,26 @@ export class MeetingClient {
     this.send({ v: 1, type: paused ? "audio.pause" : "audio.resume" });
   }
 
+  sendSignal(message: object): void { this.send(message); }
+
+  flush(timeoutMs = 2_000): Promise<boolean> {
+    if (this.socket?.readyState !== WebSocket.OPEN) return Promise.resolve(false);
+    this.inputClosed = true;
+    if (this.flushWaiter) return new Promise((resolve) => {
+      const prior = this.flushWaiter!;
+      const oldResolve = prior.resolve;
+      prior.resolve = (value) => { oldResolve(value); resolve(value); };
+    });
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.flushWaiter = null;
+        resolve(false);
+      }, timeoutMs);
+      this.flushWaiter = { resolve, timer };
+      this.send({ v: 1, type: "audio.flush", last_sequence: this.sequence - 1 });
+    });
+  }
+
   private send(payload: unknown): void {
     if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(payload));
   }
@@ -178,6 +222,11 @@ export class MeetingClient {
     this.closing = true;
     this.stopPinging();
     if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    if (this.flushWaiter) {
+      clearTimeout(this.flushWaiter.timer);
+      this.flushWaiter.resolve(false);
+      this.flushWaiter = null;
+    }
     this.socket?.close();
     this.socket = null;
   }

@@ -58,6 +58,7 @@ export type OutputsResponse = components["schemas"]["OutputsResponse"];
 export type JoinResponse = components["schemas"]["JoinResponse"];
 export type ReadinessResponse = components["schemas"]["ReadinessResponse"];
 export type DependencyView = components["schemas"]["DependencyView"];
+export type IceConfigResponse = components["schemas"]["IceConfigResponse"];
 
 export const api = {
   livez: () => request<{ status: string; version: string }>("/livez"),
@@ -82,6 +83,7 @@ export const api = {
   },
   listMeetings: () => request<{ meetings: Meeting[] }>("/meetings"),
   getMeeting: (id: string) => request<MeetingDetail>(`/meetings/${id}`),
+  iceConfig: (id: string) => request<IceConfigResponse>(`/meetings/${id}/ice-config`),
   createMeeting: (title: string) =>
     request<CreateMeetingResponse>("/meetings", {
       method: "POST",

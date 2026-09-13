@@ -49,7 +49,40 @@ class AudioPause(BaseModel):
     type: Literal["audio.pause", "audio.resume"]
 
 
-ClientMessage = Hello | Ping | AudioPause
+class AudioFlush(BaseModel):
+    """End-of-input marker for the current capture (R5)."""
+
+    v: Literal[1] = 1
+    type: Literal["audio.flush"]
+    last_sequence: int = Field(ge=-1, le=2**32 - 1)
+
+
+class RTCOffer(BaseModel):
+    """Authenticated, meeting-scoped WebRTC offer (R5)."""
+
+    v: Literal[1] = 1
+    type: Literal["rtc.offer"]
+    target_participant_id: str = Field(min_length=1, max_length=64)
+    sdp: str = Field(min_length=1, max_length=100_000)
+
+
+class RTCAnswer(BaseModel):
+    v: Literal[1] = 1
+    type: Literal["rtc.answer"]
+    target_participant_id: str = Field(min_length=1, max_length=64)
+    sdp: str = Field(min_length=1, max_length=100_000)
+
+
+class RTCIceCandidate(BaseModel):
+    v: Literal[1] = 1
+    type: Literal["rtc.ice"]
+    target_participant_id: str = Field(min_length=1, max_length=64)
+    candidate: str = Field(min_length=1, max_length=10_000)
+    sdp_mid: str | None = Field(default=None, max_length=256)
+    sdp_m_line_index: int | None = Field(default=None, ge=0, le=255)
+
+
+ClientMessage = Hello | Ping | AudioPause | AudioFlush | RTCOffer | RTCAnswer | RTCIceCandidate
 
 
 class HelloOk(BaseModel):
@@ -147,3 +180,14 @@ class ErrorMessage(BaseModel):
 class Pong(BaseModel):
     type: Literal["pong"] = "pong"
     t: int
+
+
+class RTCForward(BaseModel):
+    """Server-added sender identity for a forwarded RTC message."""
+
+    type: Literal["rtc.offer", "rtc.answer", "rtc.ice"]
+    from_participant_id: str
+    sdp: str | None = None
+    candidate: str | None = None
+    sdp_mid: str | None = None
+    sdp_m_line_index: int | None = None

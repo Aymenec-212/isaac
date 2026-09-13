@@ -42,6 +42,12 @@ class SocketBroadcaster:
     def is_current(self, meeting_id: str, participant_id: str, socket: SocketLike) -> bool:
         return self._owners.get(meeting_id, {}).get(participant_id) is socket
 
+    def is_connected(self, meeting_id: str, participant_id: str) -> bool:
+        return participant_id in self._owners.get(meeting_id, {})
+
+    def connected_participants(self, meeting_id: str) -> set[str]:
+        return set(self._owners.get(meeting_id, {}))
+
     async def unregister(
         self, meeting_id: str, participant_id: str, socket: SocketLike | None = None
     ) -> bool:
@@ -97,3 +103,13 @@ class SocketBroadcaster:
             if socket is not None:
                 await self._send(meeting_id, participant_id, socket, message)
                 return
+
+    async def send_to_meeting(
+        self, meeting_id: str, participant_id: str, message: dict[str, object]
+    ) -> bool:
+        """Deliver only to a currently connected participant in this meeting."""
+        socket = self._sockets.get(meeting_id, {}).get(participant_id)
+        if socket is None:
+            return False
+        await self._send(meeting_id, participant_id, socket, message)
+        return self.is_connected(meeting_id, participant_id)

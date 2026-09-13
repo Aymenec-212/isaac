@@ -1,13 +1,15 @@
 # PROJECT_STATE.md
 
 **Project:** Mosaïque — realtime meeting intelligence, French-first
-**Last updated:** 2026-09-13 (rev 29 — R4 identity and guest review)
-**Updated by:** Codex, R4 identity slice
-**Current slice:** **R4 — implemented and tested; review pending.**
-R3 merged in PR #22 (`0fb1a8f`). See [R4 behavior, migration and tests](docs/r4-identity-review.md).
+**Last updated:** 2026-09-13 (rev 30 — R5 WebRTC voice)
+**Updated by:** Codex, R5 voice slice
+**Current slice:** **R5 — implemented and tested; review pending.**
+R4 merged in PR #23 (`1e48a9a`). See [R5 behavior, contracts and limits](docs/r5-webrtc-voice.md).
 Retry/reload preserves participant identity; fresh captures use fresh audio sessions.
 Guests retain meeting-scoped review/audio credentials; only the owning host can mutate.
-No GPU deployment, region amendment or WebRTC implementation is included.
+Direct WebRTC signaling, ICE credential issuance, peer playback, mute/leave and
+bounded end-of-input coordination are implemented. No TURN service or real call
+acceptance is verified.
 
 **Current priority:** two remote participants hear each other through Mosaïque,
 stream separate microphones into real concurrent Rust `moshi-server` ASR, see
@@ -17,8 +19,8 @@ available credit, and continued voice with a warning during ASR outages.
 
 **Start at [the architecture and PR sequence](docs/two-user-cloud-architecture.md),
 then §12 below.** One slice → one documented PR → maintainer review/merge → next
-slice. Review/merge R4 before R5; real GPU acceptance stays open. The R4 baseline
-is `0fb1a8f` (merged PR #22). Existing local dependency/build-state
+slice. Review/merge R5 before R6; real GPU acceptance stays open. The R5 baseline
+is `1e48a9a` (merged PR #23). Existing local dependency/build-state
 changes and untracked `scripts/` are outside this slice.
 
 This explicitly supersedes companion-only D-01/ADR-01 and the earlier instruction
@@ -67,6 +69,12 @@ Frontend: 99 tests, typecheck/build and all 20 browser tests pass with fake ASR/
 Migration 0001→0003, downgrade to 0002 and re-upgrade pass on an isolated database.
 Ruff/format pass; mypy retains eight existing MLX errors (101 source files).
 This verifies local browser workflows, not WebRTC voice or real GPU acceptance.
+
+**R5 evidence (2026-09-13):** versioned WebRTC signaling, meeting-scoped target
+routing, ICE credential contract and shared flush barrier tests pass; backend
+ruff/format pass; OpenAPI was regenerated; frontend typecheck and **99 unit
+tests** pass. No database migration, TURN service, real browser call, GPU or
+cross-network acceptance was run. See [the R5 document](docs/r5-webrtc-voice.md).
 
 **Historical context below:** earlier phase/priority instructions are retained as
 history and superseded by this header and §12's R4 entry wherever they conflict.
@@ -564,6 +572,7 @@ Current, as of planning. Each is a deliberate choice, not an oversight.
 
 | Date | Change |
 |---|---|
+| 2026-09-13 | **rev 30 / R5.** Direct WebRTC signaling and browser peer playback, authenticated ICE configuration with expiring TURN credentials, mute/leave controls and a bounded all-peer input flush. Focused signaling/flush tests, frontend typecheck and 99 unit tests pass. No TURN, real browser call, GPU or cross-network acceptance claimed; review pending. |
 | 2026-09-13 | **rev 29 / R4.** Retry-safe joins, capture generations, socket ownership, scoped guest review/audio and owning-host authorization. PostgreSQL 16 migration round trip; 450 backend, 99 frontend and 20 browser tests pass. R3 merged #22; R4 review pending. |
 | 2026-09-13 | **rev 28 / R3.** Per-participant ASR failure isolation and fresh-session recovery, exact PCM/gap tests, bounded ingress/fan-out, shared durable finalization and stranded-job recovery. 444 backend tests and 93 frontend tests pass; GPU interruption remains unverified. R2 merged #21. |
 | 2026-09-12 | **rev 27 / R2.** Ready/capacity handshake, fixed VAD head and per-stream progress, terminal marker+silence flush, failure cleanup, cached readiness/admission and real-server probe. 329 backend unit tests pass; no NVIDIA gate claimed. R1 merged #20. Five EU T4 candidates have no listed restriction; quota/credit/allocation still unresolved. |
@@ -603,11 +612,12 @@ Written so a cold session can start without re-deriving anything. This section
 describes **intent**, unlike the rest of this file; when it disagrees with the
 tables above, the tables are right.
 
-### START HERE — R4 review and real-GPU gate (2026-09-13)
+### START HERE — R5 review and real-GPU gate (2026-09-13)
 
-R3 is merged as PR #22. R4 is implemented/tested for review; see its identity/review
-document for exact behavior, migration and rollback. Review/merge before
-R5's WebRTC voice work. R2 and R3 hardware acceptance remains open. EU candidates
+R3 is merged as PR #22 and R4 is merged as PR #23. R5 is implemented/tested for
+review; see its voice document for exact behavior, contracts and rollback.
+Review/merge before R6 deployment/metrics work. R2, R3 and real voice acceptance
+remain open. EU candidates
 include France/Spain/Italy/Poland/Sweden; unrestricted SKU listings are not proof
 of quota or allocation. Resolve eligibility and review a region amendment before
 provisioning. No hardware or call acceptance is implied by the fake tests.
