@@ -42,6 +42,7 @@ class MeetingView(BaseModel):
 
 
 class MeetingDetailView(MeetingView):
+    can_manage: bool = False
     participants: list[ParticipantView] = Field(default_factory=list)
 
 
@@ -62,9 +63,13 @@ class MeetingListResponse(BaseModel):
 class JoinRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     invite_token: str
+    join_nonce: str | None = Field(
+        default=None, min_length=16, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"
+    )
 
 
 class JoinResponse(BaseModel):
+    can_manage: bool = False
     participant: ParticipantView
     session_token: str
     ws_url: str

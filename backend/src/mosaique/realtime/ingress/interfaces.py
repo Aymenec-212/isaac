@@ -30,6 +30,7 @@ class ParticipantJoined:
     participant_id: str
     display_name: str
     audio_session_id: str
+    capture_id: str | None = None
 
 
 @dataclass(frozen=True)

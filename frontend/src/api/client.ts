@@ -6,6 +6,8 @@
  * server breaks the build here rather than at runtime in a meeting.
  */
 import type { components } from "./schema";
+import { token, meetingCredentials } from "./credentials";
+export { token, meetingCredentials } from "./credentials";
 
 export type Meeting = components["schemas"]["MeetingView"];
 export type MeetingDetail = components["schemas"]["MeetingDetailView"];
@@ -25,19 +27,11 @@ export class ApiError extends Error {
   }
 }
 
-/** Where the host token lives until Slice 7 replaces it with magic-link login. */
-const TOKEN_KEY = "mosaique.host_token";
-
-export const token = {
-  get: (): string | null => window.localStorage.getItem(TOKEN_KEY),
-  set: (value: string) => window.localStorage.setItem(TOKEN_KEY, value),
-  clear: () => window.localStorage.removeItem(TOKEN_KEY),
-};
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
-  const bearer = token.get();
+  const meetingId = path.endsWith("/join") ? undefined : path.match(/^\/meetings\/([A-Z0-9]{26})(?:\/|$)/i)?.[1];
+  const bearer = meetingId ? meetingCredentials.bearer(meetingId) : token.get();
   if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
 
   let response: Response;
@@ -93,11 +87,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ title }),
     }),
-  join: (meetingId: string, displayName: string, inviteToken: string) =>
-    request<JoinResponse>(`/meetings/${meetingId}/join`, {
+  join: async (meetingId: string, displayName: string, inviteToken: string) => {
+    const joined = await request<JoinResponse>(`/meetings/${meetingId}/join`, {
       method: "POST",
-      body: JSON.stringify({ display_name: displayName, invite_token: inviteToken }),
-    }),
+      body: JSON.stringify({ display_name: displayName, invite_token: inviteToken,
+        join_nonce: meetingCredentials.nonce(meetingId) }),
+    });
+    meetingCredentials.save(joined);
+    return joined;
+  },
   endMeeting: (meetingId: string) =>
     request<{ meeting: Meeting }>(`/meetings/${meetingId}/end`, { method: "POST" }),
   transcript: (meetingId: string, query?: string) =>
@@ -136,7 +134,7 @@ export const api = {
    */
   audio: async (meetingId: string, sessionId: string): Promise<ArrayBuffer> => {
     const headers = new Headers();
-    const bearer = token.get();
+    const bearer = meetingCredentials.bearer(meetingId);
     if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
 
     let response: Response;

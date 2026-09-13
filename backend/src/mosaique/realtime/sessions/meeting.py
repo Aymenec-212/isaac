@@ -152,6 +152,7 @@ class MeetingRuntime:
         # the transport how many sockets exist, which is what keeps blueprint
         # D-04 honest once there is more than one participant.
         self._roster: dict[str, str] = {}
+        self._captures: dict[str, str | None] = {}
         self._speaking: set[str] = set()
         # Streams whose transport has gone but whose grace has not expired.
         self._grace: dict[str, asyncio.Task[None]] = {}
@@ -275,7 +276,7 @@ class MeetingRuntime:
         elif isinstance(event, IngressError):
             log.warning("ingress_error", code=event.code, participant_id=event.participant_id)
 
-    def resume_info(self, participant_id: str) -> ResumeInfo:
+    def resume_info(self, participant_id: str, capture_id: str | None = None) -> ResumeInfo:
         """What the gateway needs to answer a `hello` (tech spec 7.4).
 
         Read-only, and deliberately the *only* thing the transport may ask the
@@ -285,14 +286,26 @@ class MeetingRuntime:
         starting again from -1 and letting a replayed buffer through.
         """
         session = self._sessions.get(participant_id)
-        if session is None:
+        if session is None or self._captures.get(participant_id) != capture_id:
             return ResumeInfo(resuming=False, last_sequence=-1)
         return ResumeInfo(resuming=True, last_sequence=session.last_sequence)
 
     async def _open_participant(self, event: ParticipantJoined) -> None:
+        closing = self._closing_streams.get(event.participant_id)
+        if closing is not None:
+            await closing
+        if (
+            event.participant_id in self._sessions
+            and self._captures.get(event.participant_id) != event.capture_id
+        ):
+            await self._close_idle_stream(event.participant_id)
+        self._captures[event.participant_id] = event.capture_id
         if event.participant_id in self._sessions:
             await self._resume_participant(event)
             return
+        grace = self._grace.pop(event.participant_id, None)
+        if grace is not None:
+            grace.cancel()
         await self._open_stream(event.participant_id, event.audio_session_id)
         await self._announce(event)
 

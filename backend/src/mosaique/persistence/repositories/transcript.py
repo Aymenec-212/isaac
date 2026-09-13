@@ -27,19 +27,34 @@ class ParticipantRepository:
         self._organization_id = organization_id
 
     async def create(
-        self, *, meeting_id: str, display_name: str, role: str, user_id: str | None = None
+        self,
+        *,
+        meeting_id: str,
+        display_name: str,
+        role: str,
+        user_id: str | None = None,
+        join_nonce_hash: str | None = None,
     ) -> Participant:
         participant = Participant(
             id=new_id(),
             meeting_id=meeting_id,
             organization_id=self._organization_id,
             user_id=user_id,
+            join_nonce_hash=join_nonce_hash,
             display_name=display_name,
             role=role,
         )
         self._session.add(participant)
         await self._session.flush()
         return participant
+
+    async def get_by_nonce(self, meeting_id: str, nonce_hash: str) -> Participant | None:
+        stmt = select(Participant).where(
+            Participant.meeting_id == meeting_id,
+            Participant.organization_id == self._organization_id,
+            Participant.join_nonce_hash == nonce_hash,
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def get(self, participant_id: str) -> Participant | None:
         stmt = select(Participant).where(

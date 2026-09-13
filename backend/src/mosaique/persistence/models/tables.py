@@ -107,6 +107,7 @@ class Participant(Base):
     __table_args__ = (
         CheckConstraint(_in("role", PARTICIPANT_ROLES), name="role_valid"),
         Index("ix_participants_meeting", "meeting_id"),
+        UniqueConstraint("meeting_id", "join_nonce_hash", name="uq_participants_join_nonce"),
     )
 
     id: Mapped[str] = ulid_pk()
@@ -121,6 +122,7 @@ class Participant(Base):
     )
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     role: Mapped[str] = mapped_column(String(8), nullable=False, default="guest")
+    join_nonce_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     join_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = created_at_col()
 

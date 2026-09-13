@@ -432,9 +432,16 @@ export interface components {
             display_name: string;
             /** Invite Token */
             invite_token: string;
+            /** Join Nonce */
+            join_nonce?: string | null;
         };
         /** JoinResponse */
         JoinResponse: {
+            /**
+             * Can Manage
+             * @default false
+             */
+            can_manage: boolean;
             participant: components["schemas"]["ParticipantView"];
             /** Session Token */
             session_token: string;
@@ -465,6 +472,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Can Manage
+             * @default false
+             */
+            can_manage: boolean;
             /** Participants */
             participants?: components["schemas"]["ParticipantView"][];
         };

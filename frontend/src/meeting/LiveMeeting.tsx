@@ -72,7 +72,7 @@ export function LiveMeeting({
       },
       onHelloOk: (participantId, resumed) => {
         setSelfId(participantId);
-        if (resumed) {
+        {
           // Tech spec 7.3: anything finalized while we were away is not coming
           // back over the socket, so ask for it. Duplicates are harmless — the
           // reconciler ignores anything that does not raise the revision.
@@ -95,8 +95,8 @@ export function LiveMeeting({
               setEntries(reconciler.current.ordered());
             })
             .catch(() => undefined);
-          return;
         }
+        if (resumed) return;
         // A reconnect past the grace also arrives with resume:false, and the
         // microphone from before is still running. Starting a second one would
         // double this participant's audio.
@@ -127,7 +127,19 @@ export function LiveMeeting({
         }
       },
       onConnectionState: setConnection,
-      onError: (code, message) => setMicError(`${code} — ${message}`),
+      onError: (code, message) => {
+        if (code === "SESSION_REPLACED" || code === "MEETING_NOT_LIVE") {
+          void capture.current?.stop();
+        }
+        if (code === "MEETING_NOT_LIVE") {
+          // End can seal ingress before this socket receives the completion
+          // broadcast. Read authorized state instead of stranding the guest.
+          void api.getMeeting(meetingId).then((meeting) => {
+            if (["COMPLETED", "FINALIZING"].includes(meeting.state)) onEnded();
+          }).catch(() => undefined);
+        }
+        setMicError(`${code} — ${message}`);
+      },
     });
     client.current = meetingClient;
     meetingClient.connect();

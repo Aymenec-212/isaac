@@ -13,6 +13,9 @@ import { groupIntoParagraphs } from "./paragraphs";
 
 /** Post-meeting review. Outputs are derived data; the transcript is authoritative. */
 export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: () => void }) {
+  const [canManage, setCanManage] = useState(false);
+  const [meetingState, setMeetingState] = useState<string | null>(null);
+  const [accessError, setAccessError] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptResponse | null>(null);
   const [outputs, setOutputs] = useState<OutputsResponse | null>(null);
   const [active, setActive] = useState<string | null>(null);
@@ -40,7 +43,23 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
   const segmentRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   useEffect(() => {
-    void api.transcript(meetingId).then(setTranscript);
+    let cancelled = false;
+    setCanManage(false);
+    setMeetingState(null);
+    setAccessError(null);
+    setTranscript(null);
+    void api.getMeeting(meetingId).then((meeting) => {
+      if (!cancelled) {
+        setCanManage(meeting.can_manage);
+        setMeetingState(meeting.state);
+      }
+    }).catch(() => { if (!cancelled) setCanManage(false); });
+    void api.transcript(meetingId).then((body) => {
+      if (!cancelled) setTranscript(body);
+    }).catch(() => {
+      if (!cancelled) setAccessError("Accès au transcript indisponible. Vérifiez votre lien ou votre jeton.");
+    });
+    return () => { cancelled = true; };
   }, [meetingId]);
 
   // Debounced, and every response checked against the query still in the box:
@@ -284,12 +303,18 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
     );
   };
 
+  if (accessError) return <div className="notice" role="alert">{accessError}</div>;
+
   return (
     <>
       <div className="head">
         <div>
           <h2>Compte rendu</h2>
-          <p>Réunion terminée. Le transcript est enregistré.</p>
+          <p>{meetingState === "FAILED"
+            ? "La finalisation a échoué. Le transcript peut être incomplet."
+            : meetingState === "FINALIZING"
+              ? "Finalisation en cours…"
+              : "Transcript et compte rendu de la réunion."}</p>
         </div>
         <button className="btn-quiet" onClick={onBack}>
           Retour aux réunions
@@ -329,14 +354,14 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
             {outputsStale && (
               <>
                 <strong>Le transcript a été corrigé — le compte rendu est à revoir.</strong>
-                <button
+                {canManage && <button
                   type="button"
                   className="btn-quiet"
                   onClick={() => void regenerate()}
                   disabled={regenerating}
                 >
                   {regenerating ? "Régénération…" : "Régénérer le compte rendu"}
-                </button>
+                </button>}
               </>
             )}
           </div>
@@ -498,7 +523,7 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
                       ? `Texte d'origine : ${segment.original_text}`
                       : undefined
                   }
-                  onDoubleClick={() => openEditor(segment)}
+                  onDoubleClick={() => { if (canManage) openEditor(segment); }}
                 >
                   {splitOnMatches(segment.text, spansFor(segment.id)).map((part, i) =>
                     part.match ? (
@@ -509,14 +534,14 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
                   )}
                   {/* Small, always present rather than on hover: a control that
                       only exists on hover cannot be found by keyboard or touch. */}
-                  <button
+                  {canManage && <button
                     type="button"
                     className="seg-edit"
                     aria-label={`Corriger : ${segment.text.slice(0, 40)}`}
                     onClick={() => openEditor(segment)}
                   >
                     ✎
-                  </button>{" "}
+                  </button>}{" "}
                 </span>
               ))}
             </p>
