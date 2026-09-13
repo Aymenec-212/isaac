@@ -1376,6 +1376,20 @@
           "invite_token": {
             "type": "string",
             "title": "Invite Token"
+          },
+          "join_nonce": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 16,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Join Nonce"
           }
         },
         "type": "object",
@@ -1387,6 +1401,11 @@
       },
       "JoinResponse": {
         "properties": {
+          "can_manage": {
+            "type": "boolean",
+            "title": "Can Manage",
+            "default": false
+          },
           "participant": {
             "$ref": "#/components/schemas/ParticipantView"
           },
@@ -1472,6 +1491,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "can_manage": {
+            "type": "boolean",
+            "title": "Can Manage",
+            "default": false
           },
           "participants": {
             "items": {

@@ -21,6 +21,7 @@ class Hello(BaseModel):
     v: Literal[1] = 1
     type: Literal["hello"]
     session_token: str
+    capture_id: str | None = Field(default=None, min_length=1, max_length=128)
     # Carried from Slice 1, consumed by reconnect in Slice 3 (blueprint X-13).
     last_ack_sequence: int | None = None
     client: dict[str, object] = Field(default_factory=dict)

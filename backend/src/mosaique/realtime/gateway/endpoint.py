@@ -143,14 +143,16 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
             return
 
         async with session_scope() as db:
-            meeting = await MeetingRepository(db, principal.organization_id).get(meeting_id)
+            meeting = await MeetingRepository(db, principal.organization_id).get(
+                meeting_id, for_update=True
+            )
             if meeting is None:
                 await websocket.close(code=1008)
                 return
             participant = await ParticipantRepository(db, principal.organization_id).get(
                 principal.subject_id
             )
-            if participant is None:
+            if participant is None or participant.meeting_id != meeting_id:
                 await websocket.close(code=1008)
                 return
             state = MeetingState(meeting.state)
@@ -183,13 +185,16 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
             # first socket is not enough — a client that ignores the error would
             # keep streaming — so it is closed here rather than asked to leave.
             with contextlib.suppress(Exception):
-                await previous.send_json(
-                    ErrorMessage(
-                        code="SESSION_REPLACED", message="Meeting opened elsewhere", fatal=True
-                    ).model_dump()
+                await asyncio.wait_for(
+                    previous.send_json(
+                        ErrorMessage(
+                            code="SESSION_REPLACED", message="Meeting opened elsewhere", fatal=True
+                        ).model_dump()
+                    ),
+                    1.0,
                 )
             with contextlib.suppress(Exception):
-                await previous.close(code=1000)
+                await asyncio.wait_for(previous.close(code=1000), 1.0)
 
         runtime = await registry.ensure(
             MeetingRef(meeting_id=meeting_id, organization_id=organization_id),
@@ -202,7 +207,9 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
         # in place. The runtime owns that decision; the gateway only reports it,
         # and carries the sequence forward so a replayed client buffer is still
         # checked for duplicates.
-        resume = runtime.resume_info(participant_id)
+        if not registry.broadcaster.is_current(meeting_id, participant_id, websocket):
+            return
+        resume = runtime.resume_info(participant_id, hello.capture_id)
 
         if not await _submit(
             ingress,
@@ -210,6 +217,7 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                 participant_id=participant_id,
                 display_name=display_name,
                 audio_session_id=audio_session_id,
+                capture_id=hello.capture_id,
             ),
             websocket,
         ):
@@ -237,6 +245,8 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
         while True:
             message = await websocket.receive()
             if message.get("type") == "websocket.disconnect":
+                break
+            if not registry.broadcaster.is_current(meeting_id, participant_id, websocket):
                 break
             liveness.seen()
 
@@ -301,10 +311,12 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
             keepalive.cancel()
         if participant_id is not None:
             registry = get_registry()
-            await registry.broadcaster.unregister(meeting_id, participant_id)
+            owned = await registry.broadcaster.unregister(meeting_id, participant_id, websocket)
             ingress = registry.ingress_for(meeting_id)
-            if ingress is not None and not ingress.submit(
-                ParticipantLeft(participant_id=participant_id)
+            if (
+                owned
+                and ingress is not None
+                and not ingress.submit(ParticipantLeft(participant_id=participant_id))
             ):
                 log.warning("ingress_leave_rejected", participant_id=participant_id)
             log.info("ws_disconnected", meeting_id=meeting_id, participant_id=participant_id)

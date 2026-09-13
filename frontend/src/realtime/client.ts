@@ -31,6 +31,8 @@ export interface MeetingClientHandlers {
 export class MeetingClient {
   private socket: WebSocket | null = null;
   private sequence = 0;
+  private readonly captureId = crypto.randomUUID();
+  private readyForAudio = false;
   private participantId: string | null = null;
   private captureStartedAt = 0;
   private attempt = 0;
@@ -50,15 +52,19 @@ export class MeetingClient {
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
     const url = `${scheme}://${window.location.host}/api/ws/meetings/${this.meetingId}`;
     this.handlers.onConnectionState(this.attempt === 0 ? "connecting" : "reconnecting");
-    this.socket = new WebSocket(url);
+    this.readyForAudio = false;
+    const socket = new WebSocket(url);
+    this.socket = socket;
     this.socket.binaryType = "arraybuffer";
 
     this.socket.onopen = () => {
+      if (this.socket !== socket) return;
       if (this.captureStartedAt === 0) this.captureStartedAt = Date.now();
       this.send({
         v: 1,
         type: "hello",
         session_token: this.sessionToken,
+        capture_id: this.captureId,
         // X-13: what we believe we got through, so the server can log a
         // disagreement. It trusts its own count, not ours.
         last_ack_sequence: this.sequence > 0 ? this.sequence - 1 : null,
@@ -67,6 +73,7 @@ export class MeetingClient {
     };
 
     this.socket.onmessage = (event) => {
+      if (this.socket !== socket) return;
       const message = JSON.parse(event.data as string);
       if (isRosterMessage(message)) {
         this.handlers.onRoster(message);
@@ -75,6 +82,7 @@ export class MeetingClient {
       switch (message.type) {
         case "hello.ok":
           this.participantId = message.participant_id;
+          this.readyForAudio = true;
           this.attempt = 0;
           this.handlers.onConnectionState("live");
           this.flushBuffer();
@@ -111,6 +119,8 @@ export class MeetingClient {
     };
 
     this.socket.onclose = () => {
+      if (this.socket !== socket) return;
+      this.readyForAudio = false;
       this.stopPinging();
       if (this.closing) {
         this.handlers.onConnectionState("closed");
@@ -118,7 +128,7 @@ export class MeetingClient {
       }
       this.scheduleRetry();
     };
-    this.socket.onerror = () => this.socket?.close();
+    this.socket.onerror = () => { if (this.socket === socket) socket.close(); };
   }
 
   private scheduleRetry(): void {
@@ -146,7 +156,7 @@ export class MeetingClient {
 
   sendAudio(pcm: ArrayBuffer): void {
     const sequence = this.sequence++;
-    if (this.socket?.readyState !== WebSocket.OPEN) {
+    if (!this.readyForAudio || this.socket?.readyState !== WebSocket.OPEN) {
       // Offline: hold it. The sequence still advances, so what we send when we
       // get back continues where the server left off.
       this.buffer.push(sequence, pcm);

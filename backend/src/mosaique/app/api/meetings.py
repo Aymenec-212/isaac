@@ -34,12 +34,18 @@ from mosaique.app.api.schemas import (
     SegmentView,
     TranscriptResponse,
 )
-from mosaique.app.auth.authorize import authorize_meeting_access, require_host
+from mosaique.app.auth.authorize import (
+    authorize_meeting_access,
+    can_manage_meeting,
+    require_host,
+    require_meeting_host,
+)
 from mosaique.app.auth.tokens import (
     hash_token,
     issue_host_token,
     issue_session_token,
     new_invite_token,
+    verify_token,
 )
 from mosaique.domain.errors import ErrorCode, InvalidToken, MosaiqueError, NotFound
 from mosaique.domain.ids import is_valid_id
@@ -114,6 +120,7 @@ async def create_meeting(
     settings: SettingsDep,
 ) -> CreateMeetingResponse:
     """Create a meeting and return the host token plus the invite link."""
+    require_host(principal)
     repo = MeetingRepository(session, principal.organization_id)
     invite_token = new_invite_token()
     meeting = await repo.create(
@@ -138,6 +145,7 @@ async def create_meeting(
 @router.get("", response_model=MeetingListResponse)
 async def list_meetings(principal: PrincipalDep, session: SessionDep) -> MeetingListResponse:
     """Meetings for the caller's organization, newest first."""
+    require_host(principal)
     repo = MeetingRepository(session, principal.organization_id)
     meetings = await repo.list()
     return MeetingListResponse(meetings=[MeetingView.model_validate(m) for m in meetings])
@@ -151,13 +159,22 @@ async def get_meeting(
         raise NotFound()
     repo = MeetingRepository(session, principal.organization_id)
     meeting = authorize_meeting_access(principal, await repo.get(meeting_id))
-    return MeetingDetailView.model_validate(meeting)
+    participants = await ParticipantRepository(session, principal.organization_id).list_for_meeting(
+        meeting_id
+    )
+    return MeetingDetailView.model_validate(meeting).model_copy(
+        update={
+            "can_manage": can_manage_meeting(principal, meeting),
+            "participants": [ParticipantView.model_validate(p) for p in participants],
+        }
+    )
 
 
 @router.post("/{meeting_id}/join", response_model=JoinResponse)
 async def join_meeting(
     meeting_id: str,
     body: JoinRequest,
+    request: Request,
     session: SessionDep,
     settings: SettingsDep,
 ) -> JoinResponse:
@@ -168,7 +185,7 @@ async def join_meeting(
     """
     if not is_valid_id(meeting_id):
         raise NotFound()
-    stmt = select(Meeting).where(Meeting.id == meeting_id)
+    stmt = select(Meeting).where(Meeting.id == meeting_id).with_for_update()
     meeting = (await session.execute(stmt)).scalar_one_or_none()
     if meeting is None:
         raise NotFound()
@@ -177,11 +194,26 @@ async def join_meeting(
     if MeetingState(meeting.state) not in (MeetingState.JOINABLE, MeetingState.LIVE):
         raise MosaiqueError(ErrorCode.MEETING_NOT_LIVE, "Meeting is not open for joining")
 
-    participant = await ParticipantRepository(session, meeting.organization_id).create(
-        meeting_id=meeting.id, display_name=body.display_name, role="guest"
-    )
+    host = None
+    authorization = request.headers.get("authorization", "")
+    if authorization.startswith("Bearer "):
+        candidate = verify_token(authorization[7:], secret=settings.token_secret)
+        if can_manage_meeting(candidate, meeting):
+            host = candidate
+    participants = ParticipantRepository(session, meeting.organization_id)
+    nonce_hash = hash_token(body.join_nonce) if body.join_nonce is not None else None
+    participant = await participants.get_by_nonce(meeting_id, nonce_hash) if nonce_hash else None
+    if participant is None:
+        participant = await participants.create(
+            meeting_id=meeting.id,
+            display_name=body.display_name,
+            role="host" if host is not None else "guest",
+            user_id=host.subject_id if host is not None else None,
+            join_nonce_hash=nonce_hash,
+        )
     log.info("participant_joined", meeting_id=meeting.id, participant_id=participant.id)
     return JoinResponse(
+        can_manage=host is not None,
         participant=ParticipantView.model_validate(participant),
         session_token=issue_session_token(
             participant_id=participant.id,
@@ -209,7 +241,7 @@ async def end_meeting(
         raise NotFound()
     repo = MeetingRepository(session, principal.organization_id)
     meeting = authorize_meeting_access(principal, await repo.get(meeting_id, for_update=True))
-    require_host(principal)
+    require_meeting_host(principal, meeting)
 
     current = MeetingState(meeting.state)
     if current is MeetingState.COMPLETED:
@@ -384,7 +416,7 @@ async def correct_segment(
 
     repo = MeetingRepository(session, principal.organization_id)
     meeting = authorize_meeting_access(principal, await repo.get(meeting_id))
-    require_host(principal)
+    require_meeting_host(principal, meeting)
 
     segments = SegmentRepository(session, principal.organization_id)
     segment = await segments.get_for_meeting(meeting_id, segment_id)
@@ -444,7 +476,7 @@ async def regenerate_outputs(
         raise NotFound()
     repo = MeetingRepository(session, principal.organization_id)
     meeting = authorize_meeting_access(principal, await repo.get(meeting_id))
-    require_host(principal)
+    require_meeting_host(principal, meeting)
 
     if MeetingState(meeting.state) is not MeetingState.COMPLETED:
         raise MosaiqueError(

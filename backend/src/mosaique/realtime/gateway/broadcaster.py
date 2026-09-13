@@ -24,6 +24,8 @@ class SocketBroadcaster:
     def __init__(self) -> None:
         self._sockets: dict[str, dict[str, SocketLike]] = {}
         self._lock = asyncio.Lock()
+        # Failed sends remove delivery targets; ownership lasts until endpoint cleanup.
+        self._owners: dict[str, dict[str, SocketLike]] = {}
 
     async def register(
         self, meeting_id: str, participant_id: str, socket: SocketLike
@@ -31,17 +33,30 @@ class SocketBroadcaster:
         """Register a socket, returning any socket it replaced (tech spec 7.4)."""
         async with self._lock:
             room = self._sockets.setdefault(meeting_id, {})
-            previous = room.get(participant_id)
+            owners = self._owners.setdefault(meeting_id, {})
+            previous = owners.get(participant_id)
+            owners[participant_id] = socket
             room[participant_id] = socket
             return previous
 
-    async def unregister(self, meeting_id: str, participant_id: str) -> None:
+    def is_current(self, meeting_id: str, participant_id: str, socket: SocketLike) -> bool:
+        return self._owners.get(meeting_id, {}).get(participant_id) is socket
+
+    async def unregister(
+        self, meeting_id: str, participant_id: str, socket: SocketLike | None = None
+    ) -> bool:
         async with self._lock:
-            room = self._sockets.get(meeting_id)
-            if room is not None:
-                room.pop(participant_id, None)
-                if not room:
-                    self._sockets.pop(meeting_id, None)
+            owners = self._owners.get(meeting_id, {})
+            if socket is not None and owners.get(participant_id) is not socket:
+                return False
+            removed = owners.pop(participant_id, None) is not None
+            room = self._sockets.get(meeting_id, {})
+            room.pop(participant_id, None)
+            if not room:
+                self._sockets.pop(meeting_id, None)
+            if not owners:
+                self._owners.pop(meeting_id, None)
+            return removed
 
     async def publish(self, meeting_id: str, message: dict[str, object]) -> None:
         await asyncio.gather(
