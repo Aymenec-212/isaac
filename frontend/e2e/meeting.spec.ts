@@ -13,11 +13,9 @@
  *     npx playwright test
  */
 import { expect, test } from "@playwright/test";
-import { chromiumLaunch, isolateFromCdns } from "./launch";
+import { chromiumLaunch } from "./launch";
 
 test.use({ launchOptions: chromiumLaunch, permissions: ["microphone"] });
-
-test.beforeEach(async ({ context }) => isolateFromCdns(context));
 
 test("a host can run a meeting end to end and read the review page", async ({ page }) => {
   const hostToken = process.env.MOSAIQUE_HOST_TOKEN;

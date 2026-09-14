@@ -20,11 +20,9 @@
  *     npx playwright test e2e/review.spec.ts
  */
 import { expect, test, type Page } from "@playwright/test";
-import { chromiumLaunch, isolateFromCdns } from "./launch";
+import { chromiumLaunch } from "./launch";
 
 test.use({ launchOptions: chromiumLaunch, permissions: ["microphone"] });
-
-test.beforeEach(async ({ context }) => isolateFromCdns(context));
 
 /** Run one real meeting and land on its review page. */
 async function meetingThroughToReview(page: Page) {

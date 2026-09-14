@@ -25,11 +25,9 @@
  *     npx playwright test e2e/degraded.spec.ts
  */
 import { expect, test, type Page } from "@playwright/test";
-import { chromiumLaunch, isolateFromCdns } from "./launch";
+import { chromiumLaunch } from "./launch";
 
 test.use({ launchOptions: chromiumLaunch });
-
-test.beforeEach(async ({ context }) => isolateFromCdns(context));
 
 const dep = (name: string, state: string, gates: boolean) => ({
   name,

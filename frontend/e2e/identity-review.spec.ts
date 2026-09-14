@@ -1,6 +1,6 @@
 /** R4: reload identity and guest review with real HTTP/WS/storage and fake ASR/LLM. */
 import { expect, test } from "@playwright/test";
-import { chromiumLaunch, isolateFromCdns } from "./launch";
+import { chromiumLaunch } from "./launch";
 
 test.use({ launchOptions: chromiumLaunch, permissions: ["microphone"] });
 
@@ -14,7 +14,6 @@ test("reload retains two identities and the guest reviews transcript, outputs an
   const { meeting, invite_url: invite } = await created.json();
   const host = await browser.newContext({ baseURL: process.env.MOSAIQUE_BASE_URL ?? "http://localhost:5173", permissions: ["microphone"] });
   const guest = await browser.newContext({ baseURL: process.env.MOSAIQUE_BASE_URL ?? "http://localhost:5173", permissions: ["microphone"] });
-  await Promise.all([host, guest].map(isolateFromCdns));
   await host.addInitScript((token) => localStorage.setItem("mosaique.host_token", token), hostToken);
   const a = await host.newPage(), b = await guest.newPage();
   try {
