@@ -109,6 +109,33 @@
   --cite-wash: rgba(27, 94, 140, 0.14);
   --cite-wash-strong: rgba(27, 94, 140, 0.24);
 
+  /* The ground (F2). Zellige is glazed ceramic, and a glaze is a translucent
+     layer over a coloured body — depth by translucency, not by drop shadow.
+     That is the thesis the first line of this file already committed to; the
+     ground is the body, and the glass below is the glaze.
+
+     It must stay quiet, because long-form French sits on top of it. Three
+     layers, all low-alpha: a soft azure field, a soft verdigris field, and a
+     diamond lattice of grout lines on the 4px module — tesserae, not texture.
+     Composited over --porcelain their darkest possible point (all three
+     peaking at once, which the geometry never actually does) is
+     rgb(212, 222, 225) — within a hair of --grout itself. That number is not
+     decorative: `scripts/check-contrast.mjs` composites these three tokens to
+     derive it and measures every surface against it, because a translucent
+     surface has a contrast range, not a contrast value. */
+  --ground-azure: rgba(27, 94, 140, 0.05);
+  --ground-verdigris: rgba(47, 122, 107, 0.04);
+  --ground-grout: rgba(17, 33, 45, 0.025);
+
+  /* The glaze. Light chrome gets a white glass; the rail gets a dark one,
+     because a white glass over --ink would destroy the one surface whose text
+     is light. --glass-ink-bg is deliberately shallow — see the rail rule. */
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-edge: rgba(255, 255, 255, 0.55);
+  --glass-blur: 14px;
+  --glass-ink-bg: rgba(17, 33, 45, 0.97);
+  --glass-ink-edge: rgba(237, 240, 241, 0.14);
+
   --rail: 232px;
 }
 
@@ -126,7 +153,15 @@ body,
 
 body {
   margin: 0;
-  background: var(--porcelain);
+  /* `fixed` so the field stays put while an hour of transcript scrolls over
+     it: the ground is a ground, not part of the document flow. */
+  background-color: var(--porcelain);
+  background-image:
+    radial-gradient(120% 90% at 6% 0%, var(--ground-azure), transparent 62%),
+    radial-gradient(100% 80% at 100% 100%, var(--ground-verdigris), transparent 58%),
+    repeating-linear-gradient(45deg, var(--ground-grout) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(-45deg, var(--ground-grout) 0 1px, transparent 1px 32px);
+  background-attachment: fixed;
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: 15px;
@@ -263,6 +298,15 @@ button {
 }
 .rail .btn-quiet:hover {
   color: var(--ink);
+}
+
+/* The focus ring follows the same rule as the label above it: take the colour
+   of the surface you sit on. --azure measured 2.37:1 on the solid rail and the
+   glaze pushed it to 2.05:1 — a pinned gap (L-42) getting worse, which is what
+   the ratchet in `check-contrast.mjs` exists to refuse. A keyboard user could
+   see this button after F1 and still could not see that it was focused. */
+.rail :focus-visible {
+  outline-color: var(--porcelain);
 }
 
 input[type="text"] {
@@ -752,7 +796,14 @@ input[type="text"] {
 
 /* --- Slice 6A: dependency health banner (tech spec 15) ------------------ */
 
+/* An opaque surface of its own. It had none before F2 — it simply inherited
+   whatever the page was, which was survivable while the page was flat
+   --porcelain and is not once there is a ground behind it: measured against
+   the ground's worst case the warning text fell to 3.93:1 and its technical
+   detail to 3.61:1. A banner that reports a failure is the last thing in the
+   app that should depend on what happens to be behind it. */
 .health-banner {
+  background-color: var(--surface);
   margin: 0 0 16px;
   padding: 12px 14px;
   border-radius: var(--tile-panel);
@@ -772,15 +823,19 @@ input[type="text"] {
 
 /* Blocked and unreachable read the same to a person: you cannot hold a
    meeting right now. Only the detail below distinguishes them. */
+/* The wash is a `background-image` and not a `background-color` so that it
+   composites *over* whatever `.health-banner` puts in the colour slot — glass
+   where the browser supports it, nothing where it does not. Two identical
+   stops is the ordinary way to spell "a flat fill in the image layer". */
 .health-blocked,
 .health-unreachable {
   color: var(--danger);
-  background: var(--danger-wash);
+  background-image: linear-gradient(var(--danger-wash), var(--danger-wash));
 }
 
 .health-warning {
   color: var(--warn);
-  background: var(--warn-wash);
+  background-image: linear-gradient(var(--warn-wash), var(--warn-wash));
 }
 
 .health-toggle {
@@ -834,4 +889,87 @@ input[type="text"] {
   color: inherit;
   border-radius: var(--tile);
   padding: 0 1px;
+}
+
+/* --- F2: the glaze ------------------------------------------------------ */
+
+/*
+ * Glass is for chrome, and never for a reading surface.
+ *
+ * `.transcript`, `.para`, `.seg`, `.ledger`, `.row` and the body of
+ * `.outputs` stay fully opaque on purpose: long-form French over a blurred,
+ * varying backdrop is exactly where this material fails, and that text is the
+ * product. `e2e/glass.spec.ts` asserts it so the rule cannot erode.
+ *
+ * Every rule below is written fallback-first. The opaque background each of
+ * these surfaces already carries stays in the base stylesheet; the glass is
+ * additive, inside `@supports`, and withdrawn again under reduced
+ * transparency. A browser without `backdrop-filter` therefore renders exactly
+ * what F1 rendered, which is also what the contrast gate measured first.
+ *
+ * One surface on the plan's list is deliberately not here: `.seg-editor`.
+ * It sits *inside* `.transcript`, so its backdrop is an opaque white card —
+ * blurring it reveals nothing, costs GPU time on every frame, and replacing
+ * its `--porcelain` panel with a near-white glass would erase the only thing
+ * separating the editor from the transcript it is editing. The plan's rule is
+ * "glass for chrome that sits on the ground"; this is chrome that sits on
+ * paper, so it keeps its panel.
+ */
+
+@supports (backdrop-filter: blur(1px)) {
+  .health-banner,
+  .statusbar,
+  .roster-entry,
+  .notice,
+  .consent {
+    background-color: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+    /* The sheen a glaze has where it meets the light, and the only thing
+       --glass-edge is for. Inset, so it costs no layout. */
+    box-shadow: inset 0 1px 0 var(--glass-edge);
+  }
+
+  /*
+   * The rail is the one dark surface, so it takes a dark glaze — and a
+   * shallow one, at 0.97.
+   *
+   * That number was measured, not chosen. `.rail-foot` (#7c93a1) starts at
+   * only 5.12:1 on solid --ink, so every point of translucency comes out of
+   * its headroom: 0.82 measures 3.18:1 and 0.94 still measures 4.44:1, both
+   * failures. 0.97 is the deepest glaze the rail's own text survives against
+   * the ground's worst case. The honest consequence is that the rail reveals very little,
+   * so its depth is carried by the edge rather than the field — which is
+   * where a glaze over a dark body shows anyway. Going deeper means
+   * lightening `.rail-foot` first, and that is the rail question the
+   * enhancement plan parks in §6.1.
+   */
+  .rail {
+    background-color: var(--glass-ink-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+    box-shadow: inset -1px 0 0 var(--glass-ink-edge);
+  }
+}
+
+/*
+ * Someone who has asked their system for less transparency gets none. This is
+ * not a downgrade: it lands back on the opaque surfaces the base stylesheet
+ * already defines, which is the same place a browser without `backdrop-filter`
+ * lands.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  .health-banner,
+  .statusbar,
+  .roster-entry,
+  .notice,
+  .consent {
+    background-color: var(--surface);
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  .rail {
+    background-color: var(--ink);
+    backdrop-filter: none;
+    box-shadow: none;
+  }
 }
