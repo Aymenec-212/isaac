@@ -251,6 +251,20 @@ button {
   background: var(--surface);
 }
 
+/* A quiet button borrows the colour of whatever it sits on, and the rail is
+   `--ink`. Without this, `color: var(--ink)` above made "Changer de jeton" —
+   the only authentication affordance in the app — ink on ink: invisible at
+   rest, its `--grout` border the only thing showing, readable only once
+   `:hover` painted `--surface` behind it. 1.00:1, found by
+   `scripts/check-contrast.mjs` the first time anything measured it. The hover
+   rule has to come back the other way for the same reason. */
+.rail .btn-quiet {
+  color: var(--porcelain);
+}
+.rail .btn-quiet:hover {
+  color: var(--ink);
+}
+
 input[type="text"] {
   font: inherit;
   padding: 9px 12px;

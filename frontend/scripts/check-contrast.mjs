@@ -195,6 +195,9 @@ const PAIRS = [
   { what: ".btn-primary:hover label", fg: [decl(".btn-primary", "color")], on: [decl(".btn-primary:hover:not(:disabled)", "background")], min: BODY },
   { what: ".btn-primary:disabled label", fg: [decl(".btn-primary", "color")], on: [decl(".btn-primary:disabled", "background")], min: LARGE },
   { what: ".btn-quiet label on the page", fg: [decl(".btn-quiet", "color")], on: [PORCELAIN], min: BODY },
+  { what: '"Changer de jeton" at rest in the rail', fg: [decl(".rail .btn-quiet", "color")], on: [INK], min: BODY },
+  { what: '"Changer de jeton" on hover', fg: [decl(".rail .btn-quiet:hover", "color")], on: [decl(".btn-quiet:hover", "background")], min: BODY },
+  { what: ".btn-quiet border in the rail", fg: [decl(".btn-quiet", "border-color")], on: [INK], min: UI },
 
   // -- status. The reason this file exists. ------------------------------
   { what: ".health-blocked / .health-unreachable", fg: [decl(".health-blocked", "color")], on: [SURFACE, decl(".health-blocked", "background")], min: BODY },
@@ -249,14 +252,6 @@ const ACCENTS = [
  */
 const GAPS = [
   {
-    what: '"Changer de jeton" (.btn-quiet in the dark rail)',
-    fg: [decl(".btn-quiet", "color")],
-    on: [INK],
-    want: BODY,
-    floor: 1.0,
-    why: "`.btn-quiet` sets `color: var(--ink)` and the rail background is `--ink`: the label is invisible until hover paints `--surface` behind it. Only its `--grout` border shows. The enhancement plan parks this button as its own open question (§6.2) — whether it gets a real home now or waits for magic links (L-11) is the maintainer's call, so F1 measured it rather than restyling it.",
-  },
-  {
     what: ".grout hairline around inputs and cards",
     fg: [token("--grout")],
     on: [SURFACE],
@@ -286,7 +281,7 @@ const GAPS = [
     on: [INK],
     want: UI,
     floor: 2.36,
-    why: "`--azure` on `--ink` is too close to read as a focus indicator, and the rail holds one focusable control — the same button as the first gap. Fixing either probably fixes both.",
+    why: "`--azure` on `--ink` is too close to read as a focus indicator. The rail holds one focusable control — \"Changer de jeton\", whose invisible label F1 did fix — so a keyboard user can now see the button but still not see that it is focused. One line (`.rail :focus-visible { outline-color: var(--porcelain) }`, 14.33:1) whenever the rail's focus treatment is decided; F1 fixed the label because it was invisible to everyone, and left the ring because it is a visual choice.",
   },
 ];
 
