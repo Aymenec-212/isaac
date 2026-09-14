@@ -1,5 +1,3 @@
-import type { BrowserContext } from "@playwright/test";
-
 /**
  * Chromium launch options shared by the browser specs.
  *
@@ -18,16 +16,3 @@ export const chromiumLaunch = {
     ? { executablePath: process.env.MOSAIQUE_CHROMIUM_PATH }
     : {}),
 };
-
-/**
- * Cut the page off from the webfont CDN.
- *
- * `index.html` loads Google Fonts through a render-blocking `<link>`, so where
- * that host is slow or unreachable the first paint waits on it and every
- * assertion below races a third-party CDN. The typeface is cosmetic and
- * nothing here asserts on it, so the honest thing is for these tests not to
- * depend on the network at all.
- */
-export async function isolateFromCdns(context: BrowserContext): Promise<void> {
-  await context.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.abort());
-}

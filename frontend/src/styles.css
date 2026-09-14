@@ -7,6 +7,69 @@
  * quietly bridges the French product and its Darija roadmap.
  */
 
+/*
+ * The two faces, self-hosted.
+ *
+ * They used to arrive from Google Fonts through a render-blocking <link>,
+ * which cost a DNS + TLS handshake to fonts.googleapis.com and then a second
+ * connection to fonts.gstatic.com before text could paint in its real face.
+ * The historic argument for the CDN — a shared cross-site cache — has been
+ * dead since browsers partitioned the HTTP cache by top-level site. Serving
+ * them from our own origin costs zero extra connections, and it is what lets
+ * the browser specs render the real typography instead of blocking it
+ * (e2e/launch.ts used to abort those requests in all 20 specs).
+ *
+ * These are Google's own latin / latin-ext subsets, byte-for-byte: both
+ * families ship as variable fonts, which is why one file covers every weight
+ * the interface uses. See public/fonts/README.md for provenance and licence.
+ */
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("/fonts/bricolage-grotesque-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("/fonts/bricolage-grotesque-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+    U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-sans-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-sans-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+    U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
 :root {
   --ink: #11212d;
   --ink-soft: #4a5c68;
@@ -20,7 +83,32 @@
   --font-display: "Bricolage Grotesque", system-ui, sans-serif;
   --font-ui: "IBM Plex Sans", system-ui, sans-serif;
 
-  --tile: 4px;
+  /* The radii scale. The mosaic module is 4px and everything else is a stated
+     role beside it, because six competing raw values is how a system stops
+     being one. `--tile-chip: 1px` is deliberate and not drift — the tessera
+     comment below says why a state dot is a tile and not a circle, and the
+     meter and the inline metadata chips are that same motif. `--tile-pill` is
+     reserved for status tags, the only things here that should read as pills. */
+  --tile: 4px; /* the mosaic module — panels, inputs, buttons, inline washes */
+  --tile-chip: 1px; /* tessera, meter, inline metadata */
+  --tile-panel: 8px; /* banners, editors */
+  --tile-pill: 999px; /* status tags only: .tag-interim, .evidence-link */
+
+  /* Status. These two hexes were already right — 5.93:1 and 5.94:1 on
+     --surface — they were just written out four times with six one-off washes
+     beside them. Named once, they can be measured once. */
+  --danger: #b3261e;
+  --danger-wash: rgba(179, 38, 30, 0.08);
+  --warn: #8a5a00;
+  --warn-wash: rgba(138, 90, 0, 0.09);
+
+  /* Citation and search highlighting, derived from --azure. This used to be a
+     second blue — rgba(120, 160, 255, …) at three opacities — which meant the
+     most product-specific affordance on the review page was painted in a
+     colour the palette does not contain. */
+  --cite-wash: rgba(27, 94, 140, 0.14);
+  --cite-wash-strong: rgba(27, 94, 140, 0.24);
+
   --rail: 232px;
 }
 
@@ -163,6 +251,20 @@ button {
   background: var(--surface);
 }
 
+/* A quiet button borrows the colour of whatever it sits on, and the rail is
+   `--ink`. Without this, `color: var(--ink)` above made "Changer de jeton" —
+   the only authentication affordance in the app — ink on ink: invisible at
+   rest, its `--grout` border the only thing showing, readable only once
+   `:hover` painted `--surface` behind it. 1.00:1, found by
+   `scripts/check-contrast.mjs` the first time anything measured it. The hover
+   rule has to come back the other way for the same reason. */
+.rail .btn-quiet {
+  color: var(--porcelain);
+}
+.rail .btn-quiet:hover {
+  color: var(--ink);
+}
+
 input[type="text"] {
   font: inherit;
   padding: 9px 12px;
@@ -226,7 +328,7 @@ input[type="text"] {
 .tessera {
   width: 8px;
   height: 8px;
-  border-radius: 1px;
+  border-radius: var(--tile-chip);
   background: var(--ink-soft);
 }
 .tessera[data-state="JOINABLE"] {
@@ -373,7 +475,7 @@ input[type="text"] {
   flex: 1;
   height: 6px;
   background: var(--porcelain);
-  border-radius: 1px;
+  border-radius: var(--tile-chip);
   overflow: hidden;
 }
 
@@ -451,7 +553,7 @@ input[type="text"] {
   font-size: 12px;
   color: var(--ink-soft);
   background: var(--porcelain);
-  border-radius: 1px;
+  border-radius: var(--tile-chip);
   padding: 1px 7px;
 }
 
@@ -473,7 +575,7 @@ input[type="text"] {
   margin-left: 0.4rem;
   padding: 0.05rem 0.4rem;
   border: 1px solid currentColor;
-  border-radius: 999px;
+  border-radius: var(--tile-pill);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -493,8 +595,8 @@ input[type="text"] {
 }
 
 .line-cited {
-  background: rgba(120, 160, 255, 0.16);
-  border-radius: 4px;
+  background: var(--cite-wash);
+  border-radius: var(--tile);
 }
 
 .muted {
@@ -537,9 +639,11 @@ input[type="text"] {
   transition: background-color 180ms ease;
 }
 
+/* The active citation: exactly one at a time, and the page has just scrolled
+   to it, so it takes the stronger of the two washes. */
 .seg-cited {
-  background: rgba(120, 160, 255, 0.28);
-  border-radius: 3px;
+  background: var(--cite-wash-strong);
+  border-radius: var(--tile);
 }
 
 /* Interim text carries a word, not only a colour and an italic. Someone who
@@ -549,7 +653,7 @@ input[type="text"] {
   margin-right: 8px;
   padding: 1px 6px;
   border: 1px solid currentColor;
-  border-radius: 999px;
+  border-radius: var(--tile-pill);
   font-size: 11px;
   font-style: normal;
   letter-spacing: 0.02em;
@@ -573,17 +677,10 @@ input[type="text"] {
 
 .outputs-stale {
   padding: 10px 12px;
-  border-radius: 8px;
-  border-left: 3px solid #8a5a00;
-  background: rgba(138, 90, 0, 0.09);
-  color: #8a5a00;
-}
-
-@media (prefers-color-scheme: dark) {
-  .outputs-stale {
-    color: #f0c26b;
-    background: rgba(240, 194, 107, 0.1);
-  }
+  border-radius: var(--tile-panel);
+  border-left: 3px solid var(--warn);
+  background: var(--warn-wash);
+  color: var(--warn);
 }
 
 /* A corrected segment is marked, not hidden: the reader should be able to tell
@@ -618,8 +715,8 @@ input[type="text"] {
   align-items: flex-end;
   margin: 8px 0 10px;
   padding: 12px;
-  border-radius: 8px;
-  background: rgba(128, 128, 128, 0.08);
+  border-radius: var(--tile-panel);
+  background: var(--porcelain);
 }
 
 .seg-editor label {
@@ -635,8 +732,8 @@ input[type="text"] {
 .seg-editor select {
   font: inherit;
   padding: 7px 9px;
-  border-radius: 6px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: var(--tile);
+  border: 1px solid var(--grout);
   background: transparent;
   color: inherit;
   resize: vertical;
@@ -658,7 +755,7 @@ input[type="text"] {
 .health-banner {
   margin: 0 0 16px;
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius: var(--tile-panel);
   border-left: 4px solid currentColor;
   display: flex;
   flex-wrap: wrap;
@@ -677,13 +774,13 @@ input[type="text"] {
    meeting right now. Only the detail below distinguishes them. */
 .health-blocked,
 .health-unreachable {
-  color: #b3261e;
-  background: rgba(179, 38, 30, 0.08);
+  color: var(--danger);
+  background: var(--danger-wash);
 }
 
 .health-warning {
-  color: #8a5a00;
-  background: rgba(138, 90, 0, 0.09);
+  color: var(--warn);
+  background: var(--warn-wash);
 }
 
 .health-toggle {
@@ -700,31 +797,13 @@ input[type="text"] {
   opacity: 0.85;
 }
 
-@media (prefers-color-scheme: dark) {
-  .health-blocked,
-  .health-unreachable {
-    color: #f2b8b5;
-    background: rgba(242, 184, 181, 0.1);
-  }
-
-  .health-warning {
-    color: #f0c26b;
-    background: rgba(240, 194, 107, 0.1);
-  }
-}
 
 /* Why the create button is dead. Same red as the blocking banner it belongs
    to, so the two read as one statement rather than two unrelated warnings. */
 .field-note {
   margin: -4px 0 12px;
   font-size: 13px;
-  color: #b3261e;
-}
-
-@media (prefers-color-scheme: dark) {
-  .field-note {
-    color: #f2b8b5;
-  }
+  color: var(--danger);
 }
 
 /* --- Slice 6A: transcript search (FR-10) -------------------------------- */
@@ -742,17 +821,17 @@ input[type="text"] {
   max-width: 420px;
   padding: 7px 11px;
   font: inherit;
-  border-radius: 6px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: var(--tile);
+  border: 1px solid var(--grout);
   background: transparent;
   color: inherit;
 }
 
-/* `mark` defaults to black-on-yellow, which is unreadable in dark mode and
-   ignores the page's own palette. */
+/* `mark` defaults to black-on-yellow, which ignores the page's own palette.
+   Several hits can be lit at once, so this is the lighter wash. */
 .transcript mark {
-  background: rgba(120, 160, 255, 0.32);
+  background: var(--cite-wash);
   color: inherit;
-  border-radius: 3px;
+  border-radius: var(--tile);
   padding: 0 1px;
 }

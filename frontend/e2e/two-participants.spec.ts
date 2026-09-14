@@ -14,7 +14,7 @@
  *     npx playwright test e2e/two-participants.spec.ts
  */
 import { expect, test, type Page } from "@playwright/test";
-import { chromiumLaunch, isolateFromCdns } from "./launch";
+import { chromiumLaunch } from "./launch";
 
 test.use({ launchOptions: chromiumLaunch, permissions: ["microphone"] });
 
@@ -56,7 +56,6 @@ test("two participants see one merged, correctly attributed transcript", async (
     browser.newContext({ permissions: ["microphone"] }),
     browser.newContext({ permissions: ["microphone"] }),
   ]);
-  await Promise.all(contexts.map(isolateFromCdns));
   const [amina, bruno] = await Promise.all(contexts.map((c) => c.newPage()));
 
   // Amina hosts, and takes the invite link from the meeting she just created.

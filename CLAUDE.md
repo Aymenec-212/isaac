@@ -120,8 +120,9 @@ uv run python -m tools.replay run tools/replay/scenarios/two-participants.json \
 # frontend (from frontend/)
 npm install && npm run dev
 npm run generate:api                          # regenerate typed client
-npm run typecheck && npm test && npm run build   # 91 unit tests
-npm run test:e2e                              # Playwright, 19 specs, needs a running backend
+npm run typecheck && npm test && npm run build   # contrast gate + 115 unit tests
+npm run check:contrast                        # the same gate, verbose, with the known gaps
+npm run test:e2e                              # Playwright, 25 specs, needs a running backend
                                               # MOSAIQUE_CHROMIUM_PATH overrides the browser
 ```
 

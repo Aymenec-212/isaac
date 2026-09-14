@@ -2,7 +2,7 @@
  * Setup and optional MOSAIQUE_R5_RELAY_ONLY=1: deploy/turn/README.md.
  */
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { chromiumLaunch, isolateFromCdns } from "./launch";
+import { chromiumLaunch } from "./launch";
 
 const relayOnly = process.env.MOSAIQUE_R5_RELAY_ONLY === "1";
 test.use({ launchOptions: chromiumLaunch, permissions: ["microphone"] });
@@ -14,7 +14,6 @@ declare global {
 }
 
 async function observeRTC(context: BrowserContext): Promise<void> {
-  await isolateFromCdns(context);
   await context.addInitScript((forceRelay) => {
     const NativePeer = window.RTCPeerConnection;
     window.__r5 = { peers: [], tracks: [] };
