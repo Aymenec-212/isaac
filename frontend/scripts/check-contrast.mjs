@@ -154,7 +154,23 @@ function ratio(foregroundLayers, backgroundLayers) {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
-const rgb = ({ r, g, b }) => `rgb(${r}, ${g}, ${b})`;
+const rgb = ({ r, g, b }) =>
+  `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+
+/**
+ * The flat fill a severity rule paints in its image layer. F2 moved these from
+ * `background` to `background-image: linear-gradient(x, x)` so the wash would
+ * composite over the glass rather than replace it; this reads the colour back
+ * out of that spelling.
+ */
+function wash(selector) {
+  const value = decl(selector, "background-image");
+  const inner = value.match(/linear-gradient\(([^)]*\)[^)]*|[^)]*)\)/);
+  if (!inner) throw new Error(`no flat wash in \`${selector}\`'s background-image`);
+  const first = inner[1].match(/(rgba?\([^)]*\)|#[0-9a-f]{3,8})/i);
+  if (!first) throw new Error(`cannot read a colour out of \`${selector}\`'s wash`);
+  return first[1];
+}
 
 /** A foreground colour at a given element `opacity`, as an rgba() string. */
 function faded(color, opacity) {
@@ -164,9 +180,31 @@ function faded(color, opacity) {
 
 /* ---------- the surfaces text actually sits on -------------------------- */
 
-const PORCELAIN = token("--porcelain"); // the page
+const PORCELAIN = token("--porcelain"); // the page, before F2 put a ground on it
 const SURFACE = token("--surface"); //     cards: ledger, transcript, outputs…
-const INK = token("--ink"); //             the rail
+const INK = token("--ink"); //             the rail, with no glaze on it
+
+/*
+ * The ground, at its worst case.
+ *
+ * A translucent surface has a contrast *range*, not a contrast value, so the
+ * only safe thing to measure against is the darkest point anything can sit on.
+ * That is all three ground layers peaking at once — which the geometry never
+ * actually does, the two radial fields being anchored to opposite corners, so
+ * this is a true upper bound rather than a real pixel.
+ */
+const GROUND = [
+  PORCELAIN,
+  token("--ground-azure"),
+  token("--ground-verdigris"),
+  token("--ground-grout"),
+];
+
+/* Chrome, glazed: the same worst case seen through the glass over it. Both
+   paths ship — a browser without `backdrop-filter`, or a reader who asked for
+   less transparency, gets the opaque surface instead — so both are asserted. */
+const GLASS = [...GROUND, token("--glass-bg")];
+const INK_GLASS = [...GROUND, token("--glass-ink-bg")];
 
 const BODY = 4.5; // WCAG 1.4.3, text below 18.66px/24px bold
 const LARGE = 3; //  WCAG 1.4.3, large text
@@ -180,31 +218,47 @@ const PAIRS = [
   // -- running text ------------------------------------------------------
   { what: "body text on a card", fg: [token("--ink")], on: [SURFACE], min: BODY },
   { what: "body text on the page", fg: [token("--ink")], on: [PORCELAIN], min: BODY },
-  { what: ".row-meta / .para-time / .roster-tag", fg: [token("--ink-soft")], on: [SURFACE], min: BODY },
-  { what: ".head p / .empty", fg: [token("--ink-soft")], on: [PORCELAIN], min: BODY },
+  { what: ".row-meta / .para-time on a card", fg: [token("--ink-soft")], on: [SURFACE], min: BODY },
+  { what: ".roster-tag on glazed chrome", fg: [token("--ink-soft")], on: GLASS, min: BODY },
+  { what: ".statusbar / .notice / .consent text, glazed", fg: [token("--ink")], on: GLASS, min: BODY },
+  { what: ".consent p, glazed", fg: [token("--ink-soft")], on: GLASS, min: BODY },
+  { what: ".notice a, glazed", fg: [decl(".notice a", "color")], on: GLASS, min: BODY },
+  { what: ".head p on the ground", fg: [token("--ink-soft")], on: GROUND, min: BODY },
+  { what: ".empty on a card", fg: [token("--ink-soft")], on: [SURFACE], min: BODY },
   { what: ".speaker / .notice a / .consent-tip", fg: [decl(".speaker", "color")], on: [SURFACE], min: BODY },
   { what: ".evidence / .owner / .due chips", fg: [decl(".evidence", "color")], on: [token("--porcelain")], min: BODY },
 
   // -- the rail ----------------------------------------------------------
-  { what: ".rail default text", fg: [decl(".rail", "color")], on: [INK], min: BODY },
-  { what: ".rail p", fg: [decl(".rail p", "color")], on: [INK], min: BODY },
-  { what: ".rail-foot", fg: [decl(".rail-foot", "color")], on: [INK], min: BODY },
+  { what: ".rail default text, glazed", fg: [decl(".rail", "color")], on: INK_GLASS, min: BODY },
+  { what: ".rail p, glazed", fg: [decl(".rail p", "color")], on: INK_GLASS, min: BODY },
+  { what: ".rail-foot, glazed", fg: [decl(".rail-foot", "color")], on: INK_GLASS, min: BODY },
+  { what: ".rail-foot, no glaze", fg: [decl(".rail-foot", "color")], on: [INK], min: BODY },
 
   // -- controls ----------------------------------------------------------
   { what: ".btn-primary label", fg: [decl(".btn-primary", "color")], on: [decl(".btn-primary", "background")], min: BODY },
   { what: ".btn-primary:hover label", fg: [decl(".btn-primary", "color")], on: [decl(".btn-primary:hover:not(:disabled)", "background")], min: BODY },
   { what: ".btn-primary:disabled label", fg: [decl(".btn-primary", "color")], on: [decl(".btn-primary:disabled", "background")], min: LARGE },
-  { what: ".btn-quiet label on the page", fg: [decl(".btn-quiet", "color")], on: [PORCELAIN], min: BODY },
-  { what: '"Changer de jeton" at rest in the rail', fg: [decl(".rail .btn-quiet", "color")], on: [INK], min: BODY },
+  { what: ".btn-quiet label on the ground", fg: [decl(".btn-quiet", "color")], on: GROUND, min: BODY },
+  { what: '"Changer de jeton" at rest, glazed', fg: [decl(".rail .btn-quiet", "color")], on: INK_GLASS, min: BODY },
   { what: '"Changer de jeton" on hover', fg: [decl(".rail .btn-quiet:hover", "color")], on: [decl(".btn-quiet:hover", "background")], min: BODY },
-  { what: ".btn-quiet border in the rail", fg: [decl(".btn-quiet", "border-color")], on: [INK], min: UI },
+  { what: ".btn-quiet border in the rail", fg: [decl(".btn-quiet", "border-color")], on: INK_GLASS, min: UI },
 
   // -- status. The reason this file exists. ------------------------------
-  { what: ".health-blocked / .health-unreachable", fg: [decl(".health-blocked", "color")], on: [SURFACE, decl(".health-blocked", "background")], min: BODY },
-  { what: ".health-warning", fg: [decl(".health-warning", "color")], on: [SURFACE, decl(".health-warning", "background")], min: BODY },
-  { what: ".health-detail (opacity 0.85)", fg: [faded(decl(".health-blocked", "color"), Number(decl(".health-detail", "opacity")))], on: [SURFACE, decl(".health-blocked", "background")], min: BODY },
+  /*
+   * The banner renders straight into `.main`, which has no background of its
+   * own — so its wash composites over the *page*, not over a card. F1 modelled
+   * it as `--surface` and was measuring a backdrop the banner never had; the
+   * numbers were optimistic by a fraction. Both shipping paths are asserted:
+   * glazed where `backdrop-filter` exists, and the bare ground where it does
+   * not. The bare ground is the darker of the two and so the real gate.
+   */
+  { what: ".health-blocked, glazed", fg: [decl(".health-blocked", "color")], on: [...GLASS, wash(".health-blocked")], min: BODY },
+  { what: ".health-blocked, no glaze", fg: [decl(".health-blocked", "color")], on: [SURFACE, wash(".health-blocked")], min: BODY },
+  { what: ".health-warning, glazed", fg: [decl(".health-warning", "color")], on: [...GLASS, wash(".health-warning")], min: BODY },
+  { what: ".health-warning, no glaze", fg: [decl(".health-warning", "color")], on: [SURFACE, wash(".health-warning")], min: BODY },
+  { what: ".health-detail (opacity 0.85), no glaze", fg: [faded(decl(".health-blocked", "color"), Number(decl(".health-detail", "opacity")))], on: [SURFACE, wash(".health-blocked")], min: BODY },
   { what: ".outputs-stale", fg: [decl(".outputs-stale", "color")], on: [SURFACE, decl(".outputs-stale", "background")], min: BODY },
-  { what: ".field-note", fg: [decl(".field-note", "color")], on: [PORCELAIN], min: BODY },
+  { what: ".field-note on the ground", fg: [decl(".field-note", "color")], on: GROUND, min: BODY },
 
   // -- citation and search, now derived from --azure ---------------------
   { what: "text under .transcript mark", fg: [token("--ink")], on: [SURFACE, decl(".transcript mark", "background")], min: BODY },
@@ -218,8 +272,10 @@ const PAIRS = [
   { what: ".tessera FINALIZING on a card", fg: [decl('.tessera[data-state="FINALIZING"]', "background")], on: [SURFACE], min: UI },
   { what: ".tessera default on a card", fg: [decl(".tessera", "background")], on: [SURFACE], min: UI },
   { what: ".meter-fill in its track", fg: [decl(".meter-fill", "background")], on: [decl(".meter", "background")], min: UI },
-  { what: ".roster-entry[data-speaking] border", fg: [decl('.roster-entry[data-speaking="true"]', "border-color")], on: [PORCELAIN], min: UI },
-  { what: ":focus-visible ring on the page", fg: [decl(":focus-visible", "outline").split(" ").pop()], on: [PORCELAIN], min: UI },
+  { what: ".roster-entry[data-speaking] border on the ground", fg: [decl('.roster-entry[data-speaking="true"]', "border-color")], on: GROUND, min: UI },
+  { what: ":focus-visible ring on the ground", fg: [decl(":focus-visible", "outline").split(" ").pop()], on: GROUND, min: UI },
+  { what: ":focus-visible ring on glazed chrome", fg: [decl(":focus-visible", "outline").split(" ").pop()], on: GLASS, min: UI },
+  { what: ":focus-visible ring in the glazed rail", fg: [decl(".rail :focus-visible", "outline-color")], on: INK_GLASS, min: UI },
   { what: ":focus-visible ring on a card", fg: [decl(":focus-visible", "outline").split(" ").pop()], on: [SURFACE], min: UI },
 ];
 
@@ -240,8 +296,8 @@ const ACCENTS = [
   { what: ".line-final left border", fg: [decl(".line-final", "border-left-color")], on: [SURFACE] },
   { what: ".line-interim left border", fg: [decl(".line-interim", "border-left-color")], on: [SURFACE] },
   { what: ".para left border", fg: [decl(".para", "border-left").split(" ").pop()], on: [SURFACE] },
-  { what: ".notice left border", fg: [decl(".notice", "border-left").split(" ").pop()], on: [PORCELAIN] },
-  { what: ".consent left border", fg: [decl(".consent", "border-left").split(" ").pop()], on: [PORCELAIN] },
+  { what: ".notice left border", fg: [decl(".notice", "border-left").split(" ").pop()], on: GLASS },
+  { what: ".consent left border", fg: [decl(".consent", "border-left").split(" ").pop()], on: GLASS },
   { what: ".outputs-stale left border", fg: [decl(".outputs-stale", "border-left").split(" ").pop()], on: [SURFACE, decl(".outputs-stale", "background")] },
 ];
 
@@ -275,14 +331,6 @@ const GAPS = [
     floor: 8.6,
     why: "Passes as text; listed because the same `opacity` trick is what sinks `.seg-edit`, and the disabled variant drops to 0.4. Disabled controls are exempt from 1.4.3, but a reader still has to tell a real citation from one with no audio behind it.",
   },
-  {
-    what: ":focus-visible ring in the dark rail",
-    fg: [decl(":focus-visible", "outline").split(" ").pop()],
-    on: [INK],
-    want: UI,
-    floor: 2.36,
-    why: "`--azure` on `--ink` is too close to read as a focus indicator. The rail holds one focusable control — \"Changer de jeton\", whose invisible label F1 did fix — so a keyboard user can now see the button but still not see that it is focused. One line (`.rail :focus-visible { outline-color: var(--porcelain) }`, 14.33:1) whenever the rail's focus treatment is decided; F1 fixed the label because it was invisible to everyone, and left the ring because it is a visual choice.",
-  },
 ];
 
 /* ---------- run --------------------------------------------------------- */
@@ -292,6 +340,9 @@ const fmt = (n) => `${n.toFixed(2)}:1`;
 const failures = [];
 
 console.log(`contrast · ${CSS_PATH.replace(/.*\/frontend\//, "")}\n`);
+console.log(`  ground worst case  ${rgb(flatten(GROUND))}`);
+console.log(`  glazed chrome      ${rgb(flatten(GLASS))}`);
+console.log(`  glazed rail        ${rgb(flatten(INK_GLASS))}\n`);
 
 for (const pair of PAIRS) {
   const got = ratio(pair.fg, pair.on);
