@@ -54,10 +54,17 @@ class AudioFlush(BaseModel):
 
     v: Literal[1] = 1
     type: Literal["audio.flush"]
-    last_sequence: int = Field(ge=-1, le=2**32 - 1)
+    last_sequence: int = Field(strict=True, ge=-1, le=2**32 - 1)
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
-class RTCOffer(BaseModel):
+class RTCSignal(BaseModel):
+    connection_id: str = Field(min_length=1, max_length=64)
+    target_connection_id: str = Field(min_length=1, max_length=64)
+    negotiation_id: str = Field(min_length=1, max_length=128)
+
+
+class RTCOffer(RTCSignal):
     """Authenticated, meeting-scoped WebRTC offer (R5)."""
 
     v: Literal[1] = 1
@@ -66,14 +73,14 @@ class RTCOffer(BaseModel):
     sdp: str = Field(min_length=1, max_length=100_000)
 
 
-class RTCAnswer(BaseModel):
+class RTCAnswer(RTCSignal):
     v: Literal[1] = 1
     type: Literal["rtc.answer"]
     target_participant_id: str = Field(min_length=1, max_length=64)
     sdp: str = Field(min_length=1, max_length=100_000)
 
 
-class RTCIceCandidate(BaseModel):
+class RTCIceCandidate(RTCSignal):
     v: Literal[1] = 1
     type: Literal["rtc.ice"]
     target_participant_id: str = Field(min_length=1, max_length=64)
@@ -88,6 +95,7 @@ ClientMessage = Hello | Ping | AudioPause | AudioFlush | RTCOffer | RTCAnswer | 
 class HelloOk(BaseModel):
     type: Literal["hello.ok"] = "hello.ok"
     participant_id: str
+    connection_id: str
     display_name: str
     meeting_state: str
     meeting_started_at: int | None
@@ -186,6 +194,10 @@ class RTCForward(BaseModel):
     """Server-added sender identity for a forwarded RTC message."""
 
     type: Literal["rtc.offer", "rtc.answer", "rtc.ice"]
+    v: Literal[1] = 1
+    connection_id: str
+    target_connection_id: str
+    negotiation_id: str
     from_participant_id: str
     sdp: str | None = None
     candidate: str | None = None

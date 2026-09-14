@@ -21,18 +21,20 @@ const CLIENT_PING_MS = 10_000;
 export interface MeetingClientHandlers {
   onTranscript: (message: TranscriptMessage) => void;
   onRoster: (message: RosterMessage) => void;
-  onHelloOk: (participantId: string, resumed: boolean) => void;
+  onHelloOk: (participantId: string, resumed: boolean, connectionId?: string) => void;
   onMeetingState: (state: string) => void;
   onConnectionState: (state: ConnectionState) => void;
   onStreamStatus: (status: StreamState, lagMs: number) => void;
   onError: (code: string, message: string) => void;
   onSignal?: (message: RTCSignal) => void;
+  onPeers?: (peers: Array<{ participant_id: string; connection_id: string }>) => void;
+  onEndRequested?: () => Promise<void>;
 }
 
-export type RTCSignal =
+export type RTCSignal = { v: 1; connection_id: string; target_connection_id: string; negotiation_id: string } & (
   | { type: "rtc.offer"; from_participant_id: string; sdp: string }
   | { type: "rtc.answer"; from_participant_id: string; sdp: string }
-  | { type: "rtc.ice"; from_participant_id: string; candidate: string; sdp_mid?: string; sdp_m_line_index?: number };
+  | { type: "rtc.ice"; from_participant_id: string; candidate: string; sdp_mid?: string | null; sdp_m_line_index?: number | null });
 
 export class MeetingClient {
   private socket: WebSocket | null = null;
@@ -47,7 +49,7 @@ export class MeetingClient {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly buffer = new FrameBuffer();
   private inputClosed = false;
-  private flushWaiter: { resolve: (value: boolean) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+  private flushWaiter: { requestId: string | null; sequence: number; resolve: (value: boolean) => void; timer: ReturnType<typeof setTimeout> } | null = null;
 
   constructor(
     private readonly meetingId: string,
@@ -76,7 +78,7 @@ export class MeetingClient {
         // X-13: what we believe we got through, so the server can log a
         // disagreement. It trusts its own count, not ours.
         last_ack_sequence: this.sequence > 0 ? this.sequence - 1 : null,
-        client: { ua: navigator.userAgent, sample_rate: 24000 },
+        client: { ua: navigator.userAgent, sample_rate: 24000, voice: true },
       });
     };
 
@@ -95,7 +97,7 @@ export class MeetingClient {
           this.handlers.onConnectionState("live");
           this.flushBuffer();
           this.startPinging();
-          this.handlers.onHelloOk(message.participant_id, message.resume === true);
+          this.handlers.onHelloOk(message.participant_id, message.resume === true, message.connection_id);
           break;
         case "transcript.delta":
         case "transcript.segment.final":
@@ -110,10 +112,14 @@ export class MeetingClient {
           this.handlers.onMeetingState(message.state);
           break;
         case "meeting.end_requested":
-          void this.flush();
+          void this.finishInput(message.request_id);
+          break;
+        case "rtc.peers":
+          this.handlers.onPeers?.(message.peers);
           break;
         case "audio.flush.ok":
-          if (this.flushWaiter) {
+          if (this.flushWaiter && (message.request_id ?? null) === this.flushWaiter.requestId
+              && message.last_sequence === this.flushWaiter.sequence) {
             clearTimeout(this.flushWaiter.timer);
             this.flushWaiter.resolve(true);
             this.flushWaiter = null;
@@ -194,11 +200,23 @@ export class MeetingClient {
     this.send({ v: 1, type: paused ? "audio.pause" : "audio.resume" });
   }
 
-  sendSignal(message: object): void { this.send(message); }
+  sendSignal(message: object): void { if (this.readyForAudio && !this.inputClosed) this.send(message); }
 
-  flush(timeoutMs = 2_000): Promise<boolean> {
-    if (this.socket?.readyState !== WebSocket.OPEN) return Promise.resolve(false);
+  private async finishInput(requestId: string): Promise<void> {
+    try { await this.handlers.onEndRequested?.(); }
+    catch { this.handlers.onError("AUDIO_FLUSH_FAILED", "Microphone shutdown failed"); }
+    finally { await this.flush(1_000, requestId); }
+  }
+
+  flush(timeoutMs = 1_000, requestId: string | null = null): Promise<boolean> {
     this.inputClosed = true;
+    if (!this.readyForAudio || this.socket?.readyState !== WebSocket.OPEN) return Promise.resolve(false);
+    if (this.flushWaiter && this.flushWaiter.requestId !== requestId) {
+      const prior = this.flushWaiter;
+      clearTimeout(prior.timer);
+      this.flushWaiter = null;
+      prior.resolve(false);
+    }
     if (this.flushWaiter) return new Promise((resolve) => {
       const prior = this.flushWaiter!;
       const oldResolve = prior.resolve;
@@ -206,11 +224,12 @@ export class MeetingClient {
     });
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
+        const waiter = this.flushWaiter;
         this.flushWaiter = null;
-        resolve(false);
+        waiter?.resolve(false);
       }, timeoutMs);
-      this.flushWaiter = { resolve, timer };
-      this.send({ v: 1, type: "audio.flush", last_sequence: this.sequence - 1 });
+      this.flushWaiter = { requestId, sequence: this.sequence - 1, resolve, timer };
+      this.send({ v: 1, type: "audio.flush", request_id: requestId, last_sequence: this.sequence - 1 });
     });
   }
 

@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, field_validator
+from pydantic import Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,6 +49,30 @@ class Settings(BaseSettings):
     webrtc_turn_urls: list[str] = Field(default_factory=list)
     webrtc_turn_shared_secret: str | None = None
     webrtc_ice_credential_ttl_s: int = Field(default=3600, ge=60, le=86400)
+    webrtc_ice_transport_policy: Literal["all", "relay"] = "all"
+
+    @model_validator(mode="after")
+    def validate_ice(self) -> Settings:
+        import re
+
+        for urls, schemes in ((self.webrtc_stun_urls, "stuns?"), (self.webrtc_turn_urls, "turns?")):
+            if len(urls) > 16 or any(
+                len(url) > 2048
+                or not re.fullmatch(
+                    rf"{schemes}:(?:\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+)"
+                    r"(?::[0-9]{1,5})?(?:\?transport=(?:udp|tcp))?",
+                    url,
+                )
+                for url in urls
+            ):
+                raise ValueError("Invalid ICE server URLs")
+        if self.webrtc_turn_urls and not (
+            self.webrtc_turn_shared_secret and self.webrtc_turn_shared_secret.strip()
+        ):
+            raise ValueError("TURN URLs require a shared secret")
+        if self.webrtc_ice_transport_policy == "relay" and not self.webrtc_turn_urls:
+            raise ValueError("Relay policy requires TURN URLs")
+        return self
 
     # Raw per-participant PCM (ADR-06). Retention policy is still open (Q3).
     audio_root: Path = Path("audio")

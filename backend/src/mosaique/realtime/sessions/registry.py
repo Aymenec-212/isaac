@@ -8,13 +8,17 @@ never a final segment.
 from __future__ import annotations
 
 import asyncio
+from uuid import uuid4
 
+from mosaique.observability.logging import get_logger
 from mosaique.realtime.gateway.broadcaster import SocketBroadcaster
 from mosaique.realtime.gateway.ingress import BrowserWebSocketIngress
 from mosaique.realtime.ingress import MeetingRef
-from mosaique.realtime.sessions.meeting import MeetingRuntime
+from mosaique.realtime.sessions.meeting import DRAIN_DEADLINE_S, MeetingRuntime
 from mosaique.speech.audio import AudioStore
 from mosaique.speech.interfaces import StreamingRecognizer
+
+log = get_logger(__name__)
 
 
 class MeetingRegistry:
@@ -32,8 +36,9 @@ class MeetingRegistry:
         self._ingresses: dict[str, BrowserWebSocketIngress] = {}
         self._lock = asyncio.Lock()
         self._finalizing: dict[str, asyncio.Task[str | None]] = {}
-        self._flush_waiters: dict[str, set[str]] = {}
+        self._flush_waiters: dict[str, dict[str, str]] = {}
         self._flush_events: dict[str, asyncio.Event] = {}
+        self._flush_requests: dict[str, str] = {}
 
     @property
     def recognizer(self) -> StreamingRecognizer:
@@ -85,20 +90,28 @@ class MeetingRegistry:
     def get(self, meeting_id: str) -> MeetingRuntime | None:
         return self._runtimes.get(meeting_id)
 
-    def begin_flush(self, meeting_id: str, participants: set[str]) -> None:
-        self._flush_waiters[meeting_id] = set(participants)
+    def begin_flush(self, meeting_id: str, participants: dict[str, str], request_id: str) -> None:
+        self._flush_waiters[meeting_id] = dict(participants)
+        self._flush_requests[meeting_id] = request_id
         event = asyncio.Event()
         self._flush_events[meeting_id] = event
         if not participants:
             event.set()
 
-    def acknowledge_flush(self, meeting_id: str, participant_id: str) -> None:
+    def acknowledge_flush(
+        self, meeting_id: str, participant_id: str, connection_id: str, request_id: str | None
+    ) -> bool:
         waiting = self._flush_waiters.get(meeting_id)
-        if waiting is None:
-            return
-        waiting.discard(participant_id)
+        if (
+            waiting is None
+            or self._flush_requests.get(meeting_id) != request_id
+            or waiting.get(participant_id) != connection_id
+        ):
+            return False
+        waiting.pop(participant_id)
         if not waiting:
             self._flush_events[meeting_id].set()
+        return True
 
     async def wait_for_flush(self, meeting_id: str, timeout_s: float = 2.0) -> bool:
         event = self._flush_events.get(meeting_id)
@@ -113,6 +126,7 @@ class MeetingRegistry:
         finally:
             self._flush_waiters.pop(meeting_id, None)
             self._flush_events.pop(meeting_id, None)
+            self._flush_requests.pop(meeting_id, None)
 
     async def finalize(self, meeting_id: str) -> str | None:
         """Drain the runtime and report what produced its words.
@@ -134,7 +148,30 @@ class MeetingRegistry:
         if runtime is None:
             return None
         try:
-            await runtime.drain()
+            deadline = asyncio.get_running_loop().time() + DRAIN_DEADLINE_S
+            peers = self.broadcaster.voice_connections(meeting_id)
+            if peers:
+                request_id = str(uuid4())
+                self.begin_flush(meeting_id, peers, request_id)
+                await self.broadcaster.publish(
+                    meeting_id,
+                    {
+                        "v": 1,
+                        "type": "meeting.end_requested",
+                        "request_id": request_id,
+                        "deadline_ms": 2000,
+                    },
+                )
+                complete = await self.wait_for_flush(
+                    meeting_id, min(2.0, max(0.0, deadline - asyncio.get_running_loop().time()))
+                )
+                log.info(
+                    "meeting_input_flushed",
+                    meeting_id=meeting_id,
+                    expected=len(peers),
+                    complete=complete,
+                )
+            await runtime.drain(deadline_s=max(0.0, deadline - asyncio.get_running_loop().time()))
             return runtime.asr_version
         finally:
             self._runtimes.pop(meeting_id, None)

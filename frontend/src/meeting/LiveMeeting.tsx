@@ -63,6 +63,10 @@ export function LiveMeeting({
   const capture = useRef<MicrophoneCapture | null>(null);
   const voice = useRef<WebRTCVoice | null>(null);
   const remoteAudio = useRef<HTMLAudioElement | null>(null);
+  const onEndedRef = useRef(onEnded);
+  onEndedRef.current = onEnded;
+  const mutedRef = useRef(false);
+  const finishCapture = useRef<() => Promise<void>>(async () => {});
 
   const meetingId = joined.meeting.id;
   const sessionToken = joined.session_token;
@@ -77,22 +81,35 @@ export function LiveMeeting({
   }, [remoteStream]);
 
   useEffect(() => {
+    let disposed = false;
+    let localCapture: MicrophoneCapture | null = null;
+    let stopping = false;
+    const stopMedia = async () => {
+      stopping = true;
+      if (!disposed) setEnding(true);
+      localVoice.close();
+      const flushed = await localCapture?.finish();
+      if (flushed === false && !disposed) setMicError("La dernière fraction audio n'a pas pu être envoyée.");
+      if (!disposed) setLevel(0);
+    };
+    finishCapture.current = stopMedia;
     const meetingClient = new MeetingClient(meetingId, sessionToken, {
       onTranscript: (message) => {
         if (reconciler.current.apply(message)) setEntries(reconciler.current.ordered());
       },
       onRoster: (message) => {
         if (roster.current.apply(message)) setParticipants(roster.current.ordered());
-        if (message.type === "participant.joined") voice.current?.participantJoined(message.participant_id);
-        if (message.type === "participant.left") voice.current?.participantLeft(message.participant_id);
       },
       onStreamStatus: (status, lag) => {
         setStream(status);
         setLagMs(lag);
       },
-      onHelloOk: (participantId, resumed) => {
+      onHelloOk: (participantId, _resumed, connectionId) => {
+        if (disposed || stopping) return;
         setSelfId(participantId);
-        voice.current?.setSelfId(participantId);
+        if (connectionId) localVoice.setConnection(participantId, connectionId);
+        loadIce();
+        meetingClient.setPaused(mutedRef.current);
         {
           // Tech spec 7.3: anything finalized while we were away is not coming
           // back over the socket, so ask for it. Duplicates are harmless — the
@@ -100,6 +117,7 @@ export function LiveMeeting({
           void api
             .transcript(meetingId)
             .then((body) => {
+              if (disposed) return;
               reconciler.current.hydrate(
                 body.segments.map((segment) => ({
                   type: "transcript.segment.final" as const,
@@ -117,83 +135,90 @@ export function LiveMeeting({
             })
             .catch(() => undefined);
         }
-        if (resumed) return;
         // A reconnect past the grace also arrives with resume:false, and the
         // microphone from before is still running. Starting a second one would
         // double this participant's audio.
-        if (capture.current !== null) return;
+        if (localCapture !== null) return;
         const mic = new MicrophoneCapture();
+        localCapture = mic;
         capture.current = mic;
+        mic.setMuted(mutedRef.current);
         mic
           .start({
             onFrame: (pcm) => meetingClient.sendAudio(pcm),
-            onStream: (stream) => voice.current?.setLocalStream(stream),
+            onStream: (stream) => { if (!disposed && !stopping) localVoice.setLocalStream(stream); },
             onLevel: (value) => {
               setLevel(value);
               if (silence.current.observe(value, Date.now())) setNoAudio(true);
               else if (value > 0.001) setNoAudio(false);
             },
           })
-          .catch(() =>
-            setMicError(
+          .catch(() => {
+            void mic.stop();
+            if (!disposed) setMicError(
               "Micro refusé ou indisponible. Autorisez l'accès puis rechargez la page.",
-            ),
-          );
+            );
+          });
       },
       onMeetingState: (state) => {
-        if (state === "COMPLETED") onEnded();
+        if (state === "COMPLETED") { void stopMedia(); onEndedRef.current(); }
         if (state === "FAILED") {
-          void capture.current?.stop();
+          void stopMedia();
           meetingClient.close();
           setMicError("La finalisation a échoué. Le compte rendu est incomplet.");
         }
       },
       onConnectionState: setConnection,
-      onSignal: (message) => { void voice.current?.handleSignal(message); },
+      onSignal: (message) => { if (!stopping) void localVoice.handleSignal(message); },
+      onPeers: (peers) => { if (!stopping) localVoice.setPeers(peers); },
+      onEndRequested: stopMedia,
       onError: (code, message) => {
         if (code === "SESSION_REPLACED" || code === "MEETING_NOT_LIVE") {
-          void capture.current?.stop();
+          void stopMedia();
         }
         if (code === "MEETING_NOT_LIVE") {
           // End can seal ingress before this socket receives the completion
           // broadcast. Read authorized state instead of stranding the guest.
           void api.getMeeting(meetingId).then((meeting) => {
-            if (["COMPLETED", "FINALIZING"].includes(meeting.state)) onEnded();
+            if (["COMPLETED", "FINALIZING"].includes(meeting.state)) onEndedRef.current();
           }).catch(() => undefined);
         }
         setMicError(`${code} — ${message}`);
       },
     });
-    voice.current = new WebRTCVoice({
+    const localVoice = new WebRTCVoice({
       sendSignal: (message) => meetingClient.sendSignal(message),
       onRemoteStream: setRemoteStream,
       onState: setVoiceState,
     });
+    voice.current = localVoice;
     client.current = meetingClient;
-    meetingClient.connect();
-    void api.iceConfig(meetingId).then((config) => {
-      voice.current?.setIceServers(config.ice_servers.map((server) => ({
+    const loadIce = () => { void api.iceConfig(meetingId).then((config) => {
+      if (disposed || stopping) return;
+      localVoice.setIceServers(config.ice_servers.map((server) => ({
         urls: server.urls,
         ...(server.username ? { username: server.username } : {}),
         ...(server.credential ? { credential: server.credential } : {}),
-      })));
+      })), config.ice_transport_policy);
     }).catch(() => {
-      voice.current?.setIceServers([]);
+      if (disposed || stopping) return;
+      localVoice.close();
       setMicError("Voix directe indisponible — la transcription peut continuer.");
-    });
+    }); };
+    meetingClient.connect();
 
     return () => {
-      void capture.current?.stop();
-      voice.current?.close();
+      disposed = true;
+      stopping = true;
+      void localCapture?.stop();
+      localVoice.close();
+      capture.current = null;
       meetingClient.close();
     };
-  }, [meetingId, sessionToken, onEnded]);
+  }, [meetingId, sessionToken]);
 
   const end = useCallback(async () => {
     setEnding(true);
-    await client.current?.flush();
-    await capture.current?.stop();
-    voice.current?.close();
     try {
       await api.endMeeting(meetingId);
       onEnded();
@@ -207,15 +232,16 @@ export function LiveMeeting({
   const toggleMute = useCallback(() => {
     const next = !muted;
     setMuted(next);
+    mutedRef.current = next;
     capture.current?.setMuted(next);
     voice.current?.setMuted(next);
     client.current?.setPaused(next);
   }, [muted]);
 
-  const leave = useCallback(() => {
-    void client.current?.flush();
-    void capture.current?.stop();
-    voice.current?.close();
+  const leave = useCallback(async () => {
+    setEnding(true);
+    await finishCapture.current();
+    await client.current?.flush();
     client.current?.close();
     onLeft();
   }, [onLeft]);
@@ -232,8 +258,8 @@ export function LiveMeeting({
             {ending ? "Finalisation…" : "Terminer la réunion"}
           </button>
         )}
-        <button className="btn-quiet" onClick={toggleMute}>{muted ? "Réactiver le micro" : "Couper le micro"}</button>
-        <button className="btn-quiet" onClick={leave}>Quitter</button>
+        <button className="btn-quiet" disabled={ending} onClick={toggleMute}>{muted ? "Réactiver le micro" : "Couper le micro"}</button>
+        <button className="btn-quiet" disabled={ending} onClick={() => void leave()}>Quitter</button>
       </div>
 
       <ParticipantPanel entries={participants} selfId={selfId} />

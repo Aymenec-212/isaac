@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import time
+from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -128,6 +129,7 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
     settings = get_settings()
     participant_id: str | None = None
     audio_session_id = new_id()
+    connection_id = str(uuid4())
     keepalive: asyncio.Task[None] | None = None
 
     try:
@@ -236,12 +238,17 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
         await websocket.send_json(
             HelloOk(
                 participant_id=participant_id,
+                connection_id=connection_id,
                 display_name=display_name,
                 meeting_state=str(MeetingState.LIVE),
                 meeting_started_at=started_at_ms,
                 resume=resume.resuming,
             ).model_dump()
         )
+        if hello.client.get("voice") is True:
+            await registry.broadcaster.voice_ready(
+                meeting_id, participant_id, websocket, connection_id
+            )
         log.info(
             "ws_connected",
             meeting_id=meeting_id,
@@ -251,6 +258,9 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
 
         # ---- frame loop ----------------------------------------------------
         last_seq = resume.last_sequence
+        sealed = False
+        signal_window = time.monotonic()
+        signal_count = 0
         liveness = _Liveness()
         keepalive = asyncio.create_task(_keepalive(websocket, liveness))
         while True:
@@ -262,6 +272,13 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
             liveness.seen()
 
             if (raw := message.get("bytes")) is not None:
+                if sealed:
+                    await websocket.send_json(
+                        ErrorMessage(
+                            code="AUDIO_SEALED", message="Capture input has ended", fatal=False
+                        ).model_dump()
+                    )
+                    continue
                 try:
                     frame = decode_frame(raw)
                 except InvalidFrame as exc:
@@ -293,6 +310,9 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                 continue
 
             if (text := message.get("text")) is not None:
+                if len(text.encode("utf-8")) > 110_000:
+                    await websocket.close(code=1009)
+                    break
                 try:
                     payload = json.loads(text)
                 except json.JSONDecodeError:
@@ -302,6 +322,8 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                         ).model_dump()
                     )
                     continue
+                if not isinstance(payload, dict):
+                    continue
                 kind = payload.get("type")
                 if kind == "ping":
                     await websocket.send_json(Pong(t=payload.get("t", _now_ms())).model_dump())
@@ -309,11 +331,43 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                     pass  # `liveness.seen()` above already recorded it
                 elif kind == "audio.flush":
                     flush = AudioFlush.model_validate(payload)
-                    registry.acknowledge_flush(meeting_id, participant_id)
+                    if flush.last_sequence != last_seq:
+                        await websocket.send_json(
+                            ErrorMessage(
+                                code="AUDIO_FLUSH_INVALID",
+                                message="Last sequence was not accepted",
+                                fatal=False,
+                            ).model_dump()
+                        )
+                        continue
+                    if flush.request_id is not None and not registry.acknowledge_flush(
+                        meeting_id, participant_id, connection_id, flush.request_id
+                    ):
+                        await websocket.send_json(
+                            ErrorMessage(
+                                code="AUDIO_FLUSH_INVALID",
+                                message="Flush request is stale",
+                                fatal=False,
+                            ).model_dump()
+                        )
+                        continue
+                    sealed = True
                     await websocket.send_json(
-                        {"type": "audio.flush.ok", "last_sequence": flush.last_sequence}
+                        {
+                            "v": 1,
+                            "type": "audio.flush.ok",
+                            "last_sequence": flush.last_sequence,
+                            "request_id": flush.request_id,
+                        }
                     )
                 elif kind in ("rtc.offer", "rtc.answer", "rtc.ice"):
+                    now = time.monotonic()
+                    if now - signal_window >= 1.0:
+                        signal_window, signal_count = now, 0
+                    signal_count += 1
+                    if signal_count > 100:
+                        await websocket.close(code=1008)
+                        break
                     signal: RTCOffer | RTCAnswer | RTCIceCandidate
                     if kind == "rtc.offer":
                         signal = RTCOffer.model_validate(payload)
@@ -332,14 +386,21 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
                         continue
                     forwarded = RTCForward(
                         type=signal.type,
+                        connection_id=signal.connection_id,
+                        target_connection_id=signal.target_connection_id,
+                        negotiation_id=signal.negotiation_id,
                         from_participant_id=participant_id,
                         sdp=getattr(signal, "sdp", None),
                         candidate=getattr(signal, "candidate", None),
                         sdp_mid=getattr(signal, "sdp_mid", None),
                         sdp_m_line_index=getattr(signal, "sdp_m_line_index", None),
                     ).model_dump(exclude_none=True)
-                    if not await registry.broadcaster.send_to_meeting(
-                        meeting_id, signal.target_participant_id, forwarded
+                    if not await registry.broadcaster.forward_signal(
+                        meeting_id,
+                        participant_id,
+                        websocket,
+                        signal.target_participant_id,
+                        forwarded,
                     ):
                         await websocket.send_json(
                             ErrorMessage(
@@ -372,6 +433,8 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str) -> None:
         if participant_id is not None:
             registry = get_registry()
             owned = await registry.broadcaster.unregister(meeting_id, participant_id, websocket)
+            if owned:
+                await registry.broadcaster.publish_peers(meeting_id)
             ingress = registry.ingress_for(meeting_id)
             if (
                 owned

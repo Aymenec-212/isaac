@@ -1,0 +1,36 @@
+# Local two-browser relay gate only; never use as a public TURN deployment.
+services:
+  turn:
+    image: coturn/coturn:4.6.3
+    entrypoint: ["turnserver"]
+    command:
+      - -c
+      - /etc/coturn/local.conf
+      - --static-auth-secret=${MOSAIQUE_WEBRTC_TURN_SHARED_SECRET:?Set a fresh local TURN secret}
+      # Both forced-relay participants allocate on this same server. Advertising
+      # its fixed private relay address lets coturn route between allocations
+      # without Docker Desktop host-loopback hairpinning.
+      - --relay-ip=172.30.55.2
+      - --external-ip=${MOSAIQUE_TURN_EXTERNAL_IP:-172.30.55.2}/172.30.55.2
+    ports:
+      - "127.0.0.1:3478:3478/udp"
+      - "127.0.0.1:3478:3478/tcp"
+      - "127.0.0.1:49160-49179:49160-49179/udp"
+    volumes:
+      - ./local.conf:/etc/coturn/local.conf:ro
+    networks:
+      turn_test:
+        ipv4_address: 172.30.55.2
+    cap_drop: [ALL]
+    # The image's turnserver binary carries this file capability; allowing it
+    # is required for exec even though our listener uses an unprivileged port.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: "no"
+networks:
+  turn_test:
+    ipam:
+      config:
+        - subnet: 172.30.55.0/24

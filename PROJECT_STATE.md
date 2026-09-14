@@ -1,17 +1,23 @@
 # PROJECT_STATE.md
 
-**Fresh session:** read [the current transfer notes](docs/NEXT_SESSION_HANDOFF.md) first. R4 is [PR #23](https://github.com/Aymenec-212/isaac/pull/23); check merge state before R5.
+**Fresh session:** read [the current transfer notes](docs/NEXT_SESSION_HANDOFF.md) first and the [R5 completion evidence](docs/r5-webrtc-voice.md).
 
 **Project:** Mosaïque — realtime meeting intelligence, French-first
-**Last updated:** 2026-09-13 (rev 30 — R5 WebRTC voice)
+**Last updated:** 2026-09-14 (rev 31 — R5 completion follow-up)
 **Updated by:** Codex, R5 voice slice
-**Current slice:** **R5 — implemented and tested; review pending.**
+**Current slice:** **R5 — completion implemented and locally verified; maintainer review pending.**
+Follow-up branch: `codex/r5-completion`, after merged PR #25 (`2887460`).
+Current evidence: 462 backend tests plus the accelerated-hour test, 115 frontend
+unit tests, all 22 browser regressions, four repeated direct voice scenarios,
+and two forced-TURN scenarios pass. Frontend production build, backend lint/format
+and source type checks pass. Review/merge this follow-up before advancing to R6.
 R4 merged in PR #23 (`1e48a9a`). See [R5 behavior, contracts and limits](docs/r5-webrtc-voice.md).
 Retry/reload preserves participant identity; fresh captures use fresh audio sessions.
 Guests retain meeting-scoped review/audio credentials; only the owning host can mutate.
 Direct WebRTC signaling, ICE credential issuance, peer playback, mute/leave and
-bounded end-of-input coordination are implemented. No TURN service or real call
-acceptance is verified.
+bounded end-of-input coordination are implemented. Local native WebRTC and
+coturn relay are verified with fake microphones/ASR; remote acoustic/GPU acceptance
+is not established.
 
 **Current priority:** two remote participants hear each other through Mosaïque,
 stream separate microphones into real concurrent Rust `moshi-server` ASR, see
@@ -21,8 +27,8 @@ available credit, and continued voice with a warning during ASR outages.
 
 **Start at [the architecture and PR sequence](docs/two-user-cloud-architecture.md),
 then §12 below.** One slice → one documented PR → maintainer review/merge → next
-slice. Review/merge R5 before R6; real GPU acceptance stays open. The R5 baseline
-is `1e48a9a` (merged PR #23). Existing local dependency/build-state
+slice. Review/merge R5 before R6; real GPU acceptance stays open. The R5 completion
+baseline is `2887460` (merged PR #25). Existing local dependency/build-state
 changes and untracked `scripts/` are outside this slice.
 
 This explicitly supersedes companion-only D-01/ADR-01 and the earlier instruction

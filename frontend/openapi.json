@@ -1473,6 +1473,15 @@
             "type": "array",
             "title": "Ice Servers"
           },
+          "ice_transport_policy": {
+            "type": "string",
+            "enum": [
+              "all",
+              "relay"
+            ],
+            "title": "Ice Transport Policy",
+            "default": "all"
+          },
           "expires_at": {
             "type": "string",
             "format": "date-time",

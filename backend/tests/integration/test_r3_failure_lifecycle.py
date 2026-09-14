@@ -107,10 +107,10 @@ async def test_concurrent_http_end_does_not_complete_or_enqueue_before_drain(
         runtime = ws_client.registry.get(mid)
         original = runtime.drain
 
-        async def slow():
+        async def slow(**kwargs):
             entered.set()
             await release.wait()
-            await original()
+            await original(**kwargs)
 
         monkeypatch.setattr(runtime, "drain", slow)
         first = asyncio.create_task(
