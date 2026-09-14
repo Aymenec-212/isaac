@@ -291,6 +291,18 @@ async def test_silence_alone_is_never_reported_as_a_stalled_recognizer():
     assert session._queue.empty()
 
 
+async def test_first_audio_after_idle_is_not_immediately_timed_out():
+    session, backend = await open_session()
+    await asyncio.sleep(0.06)
+    await session.push_audio(AudioChunk(pcm=FRAME, sequence=0))
+    assert session.health().healthy
+    backend.transcribe()
+    await asyncio.sleep(0.06)
+    await session.push_audio(AudioChunk(pcm=FRAME, sequence=1))
+    assert session.health().healthy
+    await session.close()
+
+
 async def test_health_counts_events_so_the_runtime_knows_when_it_has_caught_up():
     """`_read_events` only ticks silence when emitted == consumed."""
     session, backend = await open_session()

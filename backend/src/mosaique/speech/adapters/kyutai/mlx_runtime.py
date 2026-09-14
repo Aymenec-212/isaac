@@ -186,6 +186,7 @@ class MlxBackend:
         self._processed = 0
         self._assembler: PieceAssembler | None = None
         self._holds_session_lock = False
+        self._stop = threading.Event()
         self._drained = threading.Event()
         self._drained.set()
 
@@ -221,6 +222,8 @@ class MlxBackend:
         await asyncio.to_thread(load_weights, self._hf_repo)
 
     async def start(self, emit: EventSink) -> None:
+        if self._worker is not None or self._stop.is_set():
+            raise MlxUnavailable("an MLX backend instance is single-use")
         if not _session_in_use.acquire(blocking=False):
             raise MlxUnavailable(
                 "the MLX runtime serves one stream at a time in this process; a second "
@@ -230,12 +233,49 @@ class MlxBackend:
         self._holds_session_lock = True
         self._loop = asyncio.get_running_loop()
         self._emit = emit
-        # Loading blocks for minutes on a cold cache; keep the event loop alive.
-        self._weights = await asyncio.to_thread(load_weights, self._hf_repo)
-        self._assembler = PieceAssembler(delay_ms=self._weights.delay_ms)
-        self._gen = await asyncio.to_thread(self._new_gen)
-        self._worker = threading.Thread(target=self._run, name="mlx-asr", daemon=True)
-        self._worker.start()
+        ready: asyncio.Future[None] = self._loop.create_future()
+        # One worker owns initialization, inference and the lock. Cancellation
+        # of start/close must never leak the slot or unlock an active GPU worker.
+        self._worker = threading.Thread(
+            target=self._serve, args=(ready,), name="mlx-asr", daemon=True
+        )
+        try:
+            self._worker.start()
+        except BaseException:
+            self._worker = None
+            self._release()
+            raise
+        try:
+            await ready
+        except BaseException:
+            self._stop.set()
+            self._frames.put(None)
+            raise
+
+    def _serve(self, ready: asyncio.Future[None]) -> None:
+        def report(error: Exception | None = None) -> None:
+            if ready.done():
+                return
+            if error is None:
+                ready.set_result(None)
+            else:
+                ready.set_exception(error)
+
+        try:
+            self._weights = load_weights(self._hf_repo)
+            if self._stop.is_set():
+                return
+            self._assembler = PieceAssembler(delay_ms=self._weights.delay_ms)
+            self._gen = self._new_gen()
+            assert self._loop is not None
+            self._loop.call_soon_threadsafe(report)
+            self._run()
+        except Exception as exc:
+            if self._loop is not None and not self._loop.is_closed():
+                self._loop.call_soon_threadsafe(report, exc)
+        finally:
+            self._drained.set()
+            self._release()
 
     def _new_gen(self) -> Any:
         from moshi_mlx import models, utils
@@ -255,6 +295,8 @@ class MlxBackend:
         )
 
     async def push(self, pcm: bytes) -> None:
+        if self._stop.is_set():
+            raise MlxUnavailable("MLX session is closing")
         self._drained.clear()
         self._frames.put(pcm)
 
@@ -276,11 +318,13 @@ class MlxBackend:
                 self._publish(event)
 
     async def close(self) -> None:
+        self._stop.set()
         if self._worker is not None:
             self._frames.put(None)
             await asyncio.to_thread(self._worker.join, 10.0)
-            self._worker = None
-        self._release()
+            # _serve releases even if this await is cancelled or times out.
+        else:
+            self._release()
 
     def _release(self) -> None:
         if self._holds_session_lock:
@@ -295,7 +339,7 @@ class MlxBackend:
             import mlx.core as mx
 
             assert self._weights is not None
-            while True:
+            while not self._stop.is_set():
                 pcm = self._frames.get()
                 if pcm is None:
                     return
