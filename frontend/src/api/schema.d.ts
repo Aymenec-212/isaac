@@ -454,6 +454,12 @@ export interface components {
             /** Ice Servers */
             ice_servers: components["schemas"]["IceServer"][];
             /**
+             * Ice Transport Policy
+             * @default all
+             * @enum {string}
+             */
+            ice_transport_policy: "all" | "relay";
+            /**
              * Expires At
              * Format: date-time
              */

@@ -1,5 +1,16 @@
 # Fresh-session handoff — 2026-09-13
 
+## Update — 2026-09-14: R5 completion
+
+The historical handoff below is superseded for merge/slice status: R4 and the
+initial R5 landed (PRs #23 and #25). `codex/r5-completion` adds the missing
+generation-safe negotiation, offered-transceiver audio, bounded flush/shutdown,
+and real-browser/TURN gates. See `docs/r5-webrtc-voice.md` for exact evidence:
+462 backend tests plus one accelerated-hour regression, 115 frontend unit tests,
+22 browser regressions, four repeated direct voice cases, two forced-relay cases.
+Review/merge the completion follow-up before R6. No auto-merge and no cloud/GPU
+acceptance claim. Docker is unpaused; only isolated local test resources were used.
+
 The user explicitly requested a fresh session to continue the remaining work.
 Work slice by slice: one self-contained, well-documented PR, maintainer review/merge,
 then the next slice. Do not automatically merge. Ask for concrete missing access

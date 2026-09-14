@@ -8,14 +8,16 @@ The app-server carries only signaling and never receives conversational media.
 
 ## Contracts
 
-`GET /meetings/{meeting_id}/ice-config` requires the existing host or
-meeting-scoped participant credential. It returns configured STUN URLs and,
+`GET /meetings/{meeting_id}/ice-config` requires an admitted meeting-scoped
+participant credential and a LIVE meeting (a host account token alone is not
+enough). Responses are `Cache-Control: no-store`. It returns configured STUN URLs and,
 when TURN is configured, a coturn REST credential:
 
 ```json
 {
   "ice_servers": [{"urls": ["turn:turn.example:3478"], "username": "<expiry>:<random>", "credential": "<hmac-sha1>"}],
-  "expires_at": "<UTC timestamp>"
+  "expires_at": "<UTC timestamp>",
+  "ice_transport_policy": "all"
 }
 ```
 
@@ -28,13 +30,19 @@ The authenticated meeting WebSocket accepts version-one `rtc.offer`,
 `rtc.answer`, and `rtc.ice` messages with a target participant. The gateway
 derives the sender from the socket, checks that the target is currently
 connected in the same meeting, and forwards a message with
-`from_participant_id`. A sender cannot target itself; stale/replaced sockets
-are rejected by the existing R4 ownership check.
+`from_participant_id`. Voice-capable clients advertise `hello.client.voice=true`.
+`hello.ok.connection_id` and `rtc.peers` supply socket generations. Each signal
+must carry `connection_id`, `target_connection_id`, and `negotiation_id`.
+Both socket generations are checked at delivery. A sender cannot target itself.
+SDP/candidate lengths and signaling frequency are bounded; ICE uses the explicit
+`sdp_mid` / `sdp_m_line_index` wire fields.
 
-`audio.flush` carries the sender's last sequence and receives
-`audio.flush.ok`. When the host calls end, the server sends
-`meeting.end_requested`, waits up to two seconds for every currently connected
-participant to acknowledge the flush, then enters the existing runtime drain.
+`audio.flush` carries the sender's last sequence and optional end `request_id`.
+The gateway validates the accepted sequence before sealing further audio and
+returning the matching `audio.flush.ok`. When the host calls end, the server sends
+`meeting.end_requested` with a request ID, waits up to two seconds for connected
+voice-capable participants to acknowledge, then enters the runtime drain.
+Concurrent end calls share one task, request and remaining drain budget.
 The deadline is shared; a missing peer is logged as incomplete and does not
 hold finalization open indefinitely.
 
@@ -43,11 +51,16 @@ hold finalization open indefinitely.
 `MicrophoneCapture` exposes the one acquired `MediaStream` to both consumers:
 the existing 24 kHz PCM worklet and `WebRTCVoice`. A deterministic participant
 ordering chooses the offerer, preventing simultaneous negotiation glare. ICE
-candidates are queued until the peer description exists. Mute disables the
+candidates are bounded and queued until the matching peer description exists.
+Negotiation is serialized and waits for ICE configuration, supports streamless
+remote tracks, and retries with fresh negotiations at most twice before failing.
+Reconnect/replacement invalidates stale work. Mute disables the
 track and suppresses PCM frames together; remote playback remains active.
 
-Leave closes the peer connection and the transcription socket for that
-participant. Host end flushes local input before the existing HTTP end route.
+Leave closes the peer, flushes the padded partial worklet frame, then seals and
+closes the transcription socket. Host end uses the server handshake to stop both
+participants' media and flush input. Late microphone permission after teardown
+cannot retain live tracks.
 Remote autoplay failure leaves an explicit play control. Voice state is shown
 separately from ASR state, so a working call does not imply transcription or
 recording health.
@@ -63,23 +76,36 @@ MOSAIQUE_WEBRTC_TURN_SHARED_SECRET=<protected coturn REST secret>
 MOSAIQUE_WEBRTC_ICE_CREDENTIAL_TTL_S=3600
 ```
 
-coturn deployment, TLS certificates, public/private address mapping, relay
-range, firewall rules and forced-TURN validation remain R6/R7 work. No TURN
-server, cloud resource, GPU or cross-network browser call was provisioned by
-this PR.
+Production coturn deployment, TLS certificates, public/private address mapping,
+and firewall rules remain R6/R7 work. A local bounded-port coturn configuration
+and forced-relay browser gate are in [deploy/turn](../deploy/turn/README.md).
+That local gate passed on 2026-09-14. Only isolated local test containers were
+started; no cloud resource, GPU or cross-network call was provisioned by this PR.
 
 ## Validation and limits
 
-The focused transport contract tests cover versioned signal validation,
-meeting-scoped target routing and the all-peer flush barrier. Frontend
-typecheck and the existing 99 unit tests pass; backend targeted tests and
-ruff/format pass. OpenAPI was regenerated and contains the ICE route.
+Completion follow-up on 2026-09-14, based on merged PR #25 (`2887460`):
 
-This PR does not claim audible end-to-end voice, NAT traversal, TURN relay,
-two-stream Rust ASR concurrency, GPU behavior, or cross-network acceptance.
-Those require real browsers, a configured TURN service and the later deployed
-acceptance run. WebRTC signaling is intentionally tested separately from fake
-ASR; fake transcription cannot establish media or model concurrency.
+- Backend: **462 passed**, one slow test deselected; separate accelerated-hour
+  regression **1 passed**. Isolated PostgreSQL 16, fake ASR/LLM.
+- Frontend: **115 unit tests passed**, production build passed. Backend
+  ruff/format and mypy (91 source files) passed. OpenAPI/types regenerated.
+- Entire browser suite: **22 passed**. Direct R5 scenarios separately repeated
+  twice: **4 passed**. Forced-TURN scenarios: **2 passed**.
+- Native Chromium 153 on macOS, two isolated contexts, fake microphones, real
+  RTCPeerConnection and coturn 4.6.3. Assertions cover increasing bidirectional
+  RTP, playback, mute, reload, leave/end track cleanup, and selected local AND
+  remote relay candidates (not merely candidate gathering).
+
+The browser gate caught and drove a fix for one-way audio: answerers must attach
+capture to the offered transceiver, not a pre-created unnegotiated audio m-line.
+The local TURN image requires NET_BIND_SERVICE in its capability bounding set
+for its file-capability-bearing executable to start.
+
+These gates establish local media flow and relay operation, not acoustic quality,
+cross-network/NAT acceptance, TURN/TLS under blocked UDP, real two-stream Rust ASR
+concurrency, or GPU behavior. Those remain deployed R6/R7 gates. Fake transcription
+cannot establish model concurrency. R5 is ready for maintainer review, not auto-merge.
 
 Rollback is application-only: deploy the R4 app/frontend together and remove
 the optional WebRTC settings. No migration is required and existing meetings,

@@ -53,7 +53,7 @@ from mosaique.app.auth.tokens import (
     new_invite_token,
     verify_token,
 )
-from mosaique.domain.errors import ErrorCode, InvalidToken, MosaiqueError, NotFound
+from mosaique.domain.errors import ErrorCode, Forbidden, InvalidToken, MosaiqueError, NotFound
 from mosaique.domain.ids import is_valid_id
 from mosaique.domain.state import InvalidTransition, MeetingState, end, open_room
 from mosaique.jobs import JOB_KIND, PROCESSOR_VERSION
@@ -239,13 +239,25 @@ async def join_meeting(
     response_model_exclude_none=True,
 )
 async def get_ice_config(
-    meeting_id: str, principal: PrincipalDep, session: SessionDep, settings: SettingsDep
+    meeting_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    response: Response,
 ) -> IceConfigResponse:
     """Return direct/STUN and expiring TURN credentials for an authorized peer."""
     if not is_valid_id(meeting_id):
         raise NotFound()
     repo = MeetingRepository(session, principal.organization_id)
-    authorize_meeting_access(principal, await repo.get(meeting_id))
+    meeting = authorize_meeting_access(principal, await repo.get(meeting_id))
+    participant = await ParticipantRepository(session, principal.organization_id).get(
+        principal.subject_id
+    )
+    if principal.is_host or participant is None or participant.meeting_id != meeting_id:
+        raise Forbidden("An admitted participant credential is required")
+    if meeting.state != str(MeetingState.LIVE):
+        raise MosaiqueError(ErrorCode.MEETING_INVALID_TRANSITION, "Meeting is not live")
+    response.headers["Cache-Control"] = "no-store"
 
     now = datetime.now(UTC)
     expires_at = now + timedelta(seconds=settings.webrtc_ice_credential_ttl_s)
@@ -266,7 +278,11 @@ async def get_ice_config(
                 credential=base64.b64encode(digest).decode("ascii"),
             )
         )
-    return IceConfigResponse(ice_servers=servers, expires_at=expires_at)
+    return IceConfigResponse(
+        ice_servers=servers,
+        expires_at=expires_at,
+        ice_transport_policy=settings.webrtc_ice_transport_policy,
+    )
 
 
 @router.post("/{meeting_id}/end", response_model=EndMeetingResponse)
@@ -296,19 +312,6 @@ async def end_meeting(
     await session.commit()
 
     try:
-        registry = get_registry()
-        expected_flush = registry.broadcaster.connected_participants(meeting_id)
-        registry.begin_flush(meeting_id, expected_flush)
-        await registry.broadcaster.publish(
-            meeting_id, {"type": "meeting.end_requested", "deadline_ms": 2000}
-        )
-        flush_complete = await registry.wait_for_flush(meeting_id)
-        log.info(
-            "meeting_input_flushed",
-            meeting_id=meeting_id,
-            expected=len(expected_flush),
-            complete=flush_complete,
-        )
         asr_version = await get_registry().finalize(meeting_id)
     except Exception:
         meeting.state = str(MeetingState.FAILED)

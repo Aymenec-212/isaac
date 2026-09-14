@@ -26,6 +26,67 @@ class SocketBroadcaster:
         self._lock = asyncio.Lock()
         # Failed sends remove delivery targets; ownership lasts until endpoint cleanup.
         self._owners: dict[str, dict[str, SocketLike]] = {}
+        self._voice: dict[str, dict[str, tuple[SocketLike, str]]] = {}
+
+    async def voice_ready(
+        self, meeting_id: str, participant_id: str, socket: SocketLike, connection_id: str
+    ) -> None:
+        async with self._lock:
+            if self.is_current(meeting_id, participant_id, socket):
+                self._voice.setdefault(meeting_id, {})[participant_id] = (socket, connection_id)
+        await self.publish_peers(meeting_id)
+
+    def voice_connections(self, meeting_id: str) -> dict[str, str]:
+        return {
+            pid: cid
+            for pid, (socket, cid) in self._voice.get(meeting_id, {}).items()
+            if self.is_current(meeting_id, pid, socket)
+            and self._sockets.get(meeting_id, {}).get(pid) is socket
+        }
+
+    async def publish_peers(self, meeting_id: str) -> None:
+        peers = self.voice_connections(meeting_id)
+        await asyncio.gather(
+            *(
+                self.send_to_meeting(
+                    meeting_id,
+                    pid,
+                    {
+                        "v": 1,
+                        "type": "rtc.peers",
+                        "peers": [
+                            {"participant_id": p, "connection_id": c} for p, c in peers.items()
+                        ],
+                    },
+                )
+                for pid in peers
+            )
+        )
+
+    async def forward_signal(
+        self,
+        meeting_id: str,
+        participant_id: str,
+        socket: SocketLike,
+        target: str,
+        message: dict[str, object],
+    ) -> bool:
+        # Keep replacement/cleanup excluded through the bounded send. Never re-resolve
+        # a target after an await and accidentally deliver to its next generation.
+        async with self._lock:
+            peers = self.voice_connections(meeting_id)
+            if (
+                not self.is_current(meeting_id, participant_id, socket)
+                or peers.get(participant_id) != message["connection_id"]
+                or peers.get(target) != message["target_connection_id"]
+            ):
+                return False
+            target_socket = self._sockets[meeting_id][target]
+            try:
+                await asyncio.wait_for(target_socket.send_json(message), WRITE_TIMEOUT_S)
+                return True
+            except Exception:
+                return False
 
     async def register(
         self, meeting_id: str, participant_id: str, socket: SocketLike
@@ -36,6 +97,7 @@ class SocketBroadcaster:
             owners = self._owners.setdefault(meeting_id, {})
             previous = owners.get(participant_id)
             owners[participant_id] = socket
+            self._voice.get(meeting_id, {}).pop(participant_id, None)
             room[participant_id] = socket
             return previous
 
@@ -56,6 +118,7 @@ class SocketBroadcaster:
             if socket is not None and owners.get(participant_id) is not socket:
                 return False
             removed = owners.pop(participant_id, None) is not None
+            self._voice.get(meeting_id, {}).pop(participant_id, None)
             room = self._sockets.get(meeting_id, {})
             room.pop(participant_id, None)
             if not room:

@@ -31,7 +31,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   const meetingId = path.endsWith("/join") ? undefined : path.match(/^\/meetings\/([A-Z0-9]{26})(?:\/|$)/i)?.[1];
-  const bearer = meetingId ? meetingCredentials.bearer(meetingId) : token.get();
+  const bearer = path.endsWith("/ice-config") && meetingId
+    ? meetingCredentials.get(meetingId)?.session_token
+    : meetingId ? meetingCredentials.bearer(meetingId) : token.get();
   if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
 
   let response: Response;

@@ -118,7 +118,7 @@ async def test_simultaneous_finalize_waits_for_same_durable_boundary():
     registry = MeetingRegistry(recognizer=None, audio_store=None, broadcaster=SocketBroadcaster())
     entered, release = asyncio.Event(), asyncio.Event()
 
-    async def drain():
+    async def drain(*, deadline_s):
         entered.set()
         await release.wait()
 

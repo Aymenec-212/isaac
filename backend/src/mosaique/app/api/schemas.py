@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -86,6 +87,7 @@ class IceConfigResponse(BaseModel):
     """Short-lived ICE servers for one authorized meeting (R5)."""
 
     ice_servers: list[IceServer]
+    ice_transport_policy: Literal["all", "relay"] = "all"
     expires_at: datetime
 
 
