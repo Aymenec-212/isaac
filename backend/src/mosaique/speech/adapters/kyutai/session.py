@@ -72,6 +72,10 @@ class KyutaiSession:
     async def push_audio(self, chunk: AudioChunk) -> None:
         if self._closed:
             raise RuntimeError("push_audio on a closed session")
+        # Time spent loading, waiting for a first frame, or muted is not an
+        # inference stall. Start the clock when outstanding work first arrives.
+        if self._backend.processed_frames >= self._pushed_frames:
+            self._progress_at = time.monotonic()
         self._pushed_frames += 1
         await self._backend.push(chunk.pcm)
         self._check_liveness()
