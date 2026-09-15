@@ -136,6 +136,10 @@
   --glass-ink-bg: rgba(17, 33, 45, 0.97);
   --glass-ink-edge: rgba(237, 240, 241, 0.14);
 
+  --shadow-soft: 0 12px 32px rgba(17, 33, 45, 0.08);
+  --shadow-focus: 0 0 0 3px rgba(27, 94, 140, 0.18);
+  --control-height: 42px;
+
   --rail: 232px;
 }
 
@@ -172,6 +176,7 @@ body {
 :focus-visible {
   outline: 2px solid var(--azure);
   outline-offset: 2px;
+  box-shadow: var(--shadow-focus);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -260,9 +265,19 @@ button {
   font-weight: 500;
   border-radius: var(--tile);
   border: 1px solid transparent;
-  padding: 9px 16px;
+  min-height: var(--control-height);
+  padding: 8px 16px;
   cursor: pointer;
-  transition: background-color 120ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  cursor: not-allowed;
 }
 
 .btn-primary {
@@ -272,8 +287,13 @@ button {
 .btn-primary:hover:not(:disabled) {
   background: #17527a;
 }
+.btn-primary:active:not(:disabled) {
+  background: #124566;
+}
 .btn-primary:disabled {
   background: var(--ink-soft);
+  border-color: var(--ink-soft);
+  opacity: 0.72;
   cursor: not-allowed;
 }
 
@@ -284,6 +304,10 @@ button {
 }
 .btn-quiet:hover {
   background: var(--surface);
+  border-color: var(--ink-soft);
+}
+.btn-quiet:active:not(:disabled) {
+  background: var(--porcelain);
 }
 
 /* A quiet button borrows the colour of whatever it sits on, and the rail is
@@ -309,14 +333,44 @@ button {
   outline-color: var(--porcelain);
 }
 
-input[type="text"] {
+input[type="text"],
+input[type="search"],
+textarea,
+select {
   font: inherit;
-  padding: 9px 12px;
+  min-height: var(--control-height);
+  padding: 8px 12px;
   border: 1px solid var(--grout);
   border-radius: var(--tile);
   background: var(--surface);
   color: var(--ink);
   width: 100%;
+  transition: border-color 120ms ease, box-shadow 120ms ease,
+    background-color 120ms ease;
+}
+
+input[type="text"]:hover:not(:disabled),
+input[type="search"]:hover:not(:disabled),
+textarea:hover:not(:disabled),
+select:hover:not(:disabled) {
+  border-color: var(--ink-soft);
+}
+
+input[type="text"]:focus,
+input[type="search"]:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--azure);
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+  background: var(--porcelain);
 }
 
 .field-row {
@@ -330,10 +384,11 @@ input[type="text"] {
 /* Rows, not cards: a list of meetings is a ledger, and rows compare better. */
 
 .ledger {
-  background: var(--surface);
+  background: var(--glass-bg);
   border: 1px solid var(--grout);
   border-radius: var(--tile);
   overflow: hidden;
+  box-shadow: var(--shadow-soft);
 }
 
 .row {
@@ -602,7 +657,19 @@ input[type="text"] {
 }
 
 .row-clickable {
-  cursor: default;
+  cursor: pointer;
+  transition: background-color 120ms ease, padding-left 120ms ease;
+}
+
+.row-clickable:hover {
+  background: rgba(255, 255, 255, 0.72);
+  padding-left: 22px;
+}
+
+.row-clickable:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline-offset: -2px;
 }
 
 .notice a {
@@ -774,10 +841,6 @@ input[type="text"] {
 
 .seg-editor textarea,
 .seg-editor select {
-  font: inherit;
-  padding: 7px 9px;
-  border-radius: var(--tile);
-  border: 1px solid var(--grout);
   background: transparent;
   color: inherit;
   resize: vertical;
@@ -874,10 +937,6 @@ input[type="text"] {
 .transcript-search input[type="search"] {
   flex: 1 1 260px;
   max-width: 420px;
-  padding: 7px 11px;
-  font: inherit;
-  border-radius: var(--tile);
-  border: 1px solid var(--grout);
   background: transparent;
   color: inherit;
 }
@@ -971,5 +1030,356 @@ input[type="text"] {
     background-color: var(--ink);
     backdrop-filter: none;
     box-shadow: none;
+  }
+}
+
+/* ---------- screen polish ------------------------------------------------
+ * The component markup already carries the right semantic structure. These
+ * refinements give each screen a clearer visual rhythm without changing its
+ * behavior or adding presentation-only wrappers.
+ */
+
+.main {
+  width: min(100%, 980px);
+}
+
+.head {
+  flex-wrap: wrap;
+}
+
+.head > div:first-child {
+  min-width: min(100%, 240px);
+  flex: 1 1 260px;
+}
+
+.head > button {
+  flex: 0 0 auto;
+}
+
+.field-row {
+  padding: 16px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--tile-panel);
+  background: var(--glass-bg);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-edge);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .field-row,
+  .roster {
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.12);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .field-row,
+  .roster {
+    background: var(--surface);
+    backdrop-filter: none;
+    box-shadow: var(--shadow-soft);
+  }
+}
+
+.consent,
+.notice,
+.health-banner,
+.empty {
+  box-shadow: var(--shadow-soft);
+}
+
+.consent {
+  padding: 20px 22px;
+}
+
+.consent strong,
+.notice strong {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.notice {
+  display: grid;
+  gap: 4px;
+}
+
+.notice a {
+  display: inline-block;
+  width: fit-content;
+  padding: 3px 6px;
+  border-radius: var(--tile-chip);
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.notice a:hover {
+  background: var(--cite-wash);
+}
+
+.notice a:active {
+  background: var(--cite-wash-strong);
+}
+
+.notice a:focus-visible {
+  outline: 2px solid var(--azure);
+  outline-offset: 2px;
+}
+
+.ledger {
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-edge);
+}
+
+.row {
+  min-height: 68px;
+  transition: background-color 120ms ease, padding-left 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.row-clickable:hover {
+  box-shadow: inset 3px 0 0 var(--azure);
+}
+
+.row-clickable:active {
+  background: var(--cite-wash);
+}
+
+.row-clickable:focus-visible {
+  outline: 2px solid var(--azure);
+  outline-offset: -2px;
+  box-shadow: inset 3px 0 0 var(--azure);
+}
+
+.row-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+}
+
+.roster {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--tile-panel);
+  background: var(--glass-bg);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-edge);
+}
+
+.roster-entry {
+  min-height: 36px;
+  box-shadow: 0 2px 8px rgba(17, 33, 45, 0.04);
+  transition: border-color 120ms ease, background-color 120ms ease,
+    transform 120ms ease;
+}
+
+.roster-entry[data-speaking="true"] {
+  background: rgba(47, 122, 107, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(47, 122, 107, 0.1);
+}
+
+.statusbar {
+  min-height: 58px;
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-edge);
+}
+
+.statusbar .state {
+  white-space: nowrap;
+}
+
+.meter {
+  min-width: 120px;
+}
+
+audio {
+  display: block;
+  width: 100%;
+  margin: 0 0 16px;
+  border-radius: var(--tile);
+}
+
+.transcript,
+.outputs {
+  box-shadow: 0 16px 40px rgba(17, 33, 45, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.transcript {
+  min-height: 180px;
+  padding-block: 16px;
+}
+
+.line {
+  padding-block: 5px;
+  border-radius: var(--tile);
+}
+
+.line-final {
+  background: rgba(27, 94, 140, 0.025);
+}
+
+.line-interim {
+  background: rgba(17, 33, 45, 0.025);
+}
+
+.outputs {
+  padding: 8px 22px 22px;
+}
+
+.outputs h3,
+.transcript-heading {
+  letter-spacing: -0.01em;
+}
+
+.outputs-provenance {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--grout);
+}
+
+.transcript-heading {
+  margin-top: 30px;
+}
+
+.transcript-search {
+  padding: 10px 12px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--tile-panel);
+  background: var(--glass-bg);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-edge);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .transcript-search {
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.12);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .transcript-search {
+    background: var(--surface);
+    backdrop-filter: none;
+  }
+}
+
+.evidence-link,
+.seg-edit {
+  transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease, opacity 120ms ease, transform 120ms ease;
+}
+
+.evidence-link:hover:not(:disabled),
+.evidence-link:focus-visible {
+  background: var(--cite-wash);
+  opacity: 1;
+}
+
+.evidence-link:active:not(:disabled),
+.seg-edit:active {
+  transform: translateY(1px);
+}
+
+.seg-edit:hover,
+.seg-edit:focus-visible {
+  background: var(--cite-wash);
+  border-radius: var(--tile-chip);
+}
+
+.seg-editor {
+  border: 1px solid var(--grout);
+  box-shadow: 0 8px 20px rgba(17, 33, 45, 0.06);
+}
+
+.health-toggle,
+.btn-quiet,
+.btn-primary {
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .head > div:first-child {
+    flex: 0 1 auto;
+  }
+
+  .field-row {
+    padding: 12px;
+  }
+
+  .head > button {
+    width: 100%;
+  }
+
+  .roster {
+    padding: 10px;
+  }
+
+  .roster-entry {
+    flex: 1 1 180px;
+  }
+
+  .statusbar .state {
+    white-space: normal;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .roster-entry,
+  .evidence-link,
+  .seg-edit,
+  .notice a {
+    transition: none;
+  }
+}
+
+@media (max-width: 920px) {
+  :root {
+    --rail: 196px;
+  }
+
+  .main {
+    padding-inline: 32px;
+  }
+}
+
+@media (max-width: 560px) {
+  body {
+    font-size: 14px;
+  }
+
+  .rail {
+    padding-inline: 16px;
+  }
+
+  .main {
+    padding: 22px 16px 40px;
+  }
+
+  .head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .head h2 {
+    font-size: 26px;
+  }
+
+  .field-row,
+  .seg-editor-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .field-row button,
+  .seg-editor-actions button {
+    width: 100%;
+  }
+
+  .statusbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .transcript,
+  .outputs {
+    padding-inline: 14px;
   }
 }

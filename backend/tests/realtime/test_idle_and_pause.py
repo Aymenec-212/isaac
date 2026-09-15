@@ -73,6 +73,34 @@ async def test_a_long_silence_closes_the_audio_session_and_the_next_frame_opens_
     assert len(sequences) == len(set(sequences)), f"sequence restarted: {sequences}"
 
 
+async def test_a_silent_participant_does_not_claim_the_recognizer_stream(
+    ws_client, settings, tenants
+):
+    """Joining is roster presence; the first frame claims an ASR stream.
+
+    This is required by the single-stream MLX runtime: a host or observer may
+    join and control a meeting without preventing the speaking participant
+    from transcribing.
+    """
+    token, meeting_id, (speaker, silent) = await join_two(
+        ws_client.http, settings, tenants["alpha"]
+    )
+
+    async with ws_client.websocket_connect(f"/ws/meetings/{meeting_id}") as silent_ws:
+        await hello(silent_ws, silent["session_token"])
+        runtime = ws_client.registry.get(meeting_id)
+        assert runtime is not None
+        assert silent["participant"]["id"] not in runtime._sessions  # noqa: SLF001
+
+        async with ws_client.websocket_connect(f"/ws/meetings/{meeting_id}") as speaker_ws:
+            await hello(speaker_ws, speaker["session_token"])
+            await stream(speaker_ws, start=0, count=30)
+            assert speaker["participant"]["id"] in runtime._sessions  # noqa: SLF001
+            assert silent["participant"]["id"] not in runtime._sessions  # noqa: SLF001
+
+    await ws_client.http.post(f"/meetings/{meeting_id}/end", headers=auth(token))
+
+
 async def test_pausing_is_recorded_and_a_frame_unpauses(ws_client, settings, tenants):
     """R-1: `audio.pause` is honoured rather than accepted and ignored."""
     _, meeting_id, joined = await create_and_join(ws_client.http, settings, tenants["alpha"])

@@ -18,10 +18,13 @@ RUN uv venv && uv pip install --no-cache -r pyproject.toml
 COPY src/ ./src/
 COPY alembic.ini ./
 COPY tools/ ./tools/
+COPY entrypoint.sh ./
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-RUN useradd --create-home --uid 10001 mosaique && chown -R mosaique:mosaique /app
+RUN chmod +x /app/entrypoint.sh && \
+    useradd --create-home --uid 10001 mosaique && \
+    chown -R mosaique:mosaique /app
 USER mosaique
 
 EXPOSE 8000
