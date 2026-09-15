@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { api, type JoinResponse } from "../api/client";
 import { MicrophoneCapture } from "../audio/capture";
 import {
@@ -29,6 +29,11 @@ const STREAM_LABEL: Record<StreamState, string> = {
   delayed: "Transcription en retard",
   unavailable: "Transcription indisponible — une partie du texte peut manquer",
 };
+
+const WAVEFORM_BARS = [
+  0.28, 0.42, 0.62, 0.38, 0.76, 0.52, 0.9, 0.64, 0.42, 0.72, 0.5, 0.84,
+  0.58, 0.36, 0.68, 0.46, 0.8, 0.56, 0.34, 0.64, 0.48, 0.74, 0.4, 0.3,
+];
 
 export function LiveMeeting({
   joined,
@@ -70,6 +75,7 @@ export function LiveMeeting({
 
   const meetingId = joined.meeting.id;
   const sessionToken = joined.session_token;
+  const voiceLevel = Math.min(1, level * 1.8);
 
   useEffect(() => {
     const audio = remoteAudio.current;
@@ -272,14 +278,25 @@ export function LiveMeeting({
             : CONNECTION_LABEL[connection]}
         </span>
         <span className="meter" aria-label="Niveau du micro">
-          <span className="meter-fill" style={{ width: `${Math.min(100, level * 180)}%` }} />
+          <span className="voice-wave" aria-hidden="true">
+            {WAVEFORM_BARS.map((amplitude, index) => (
+              <span
+                key={index}
+                style={{
+                  "--bar-height": `${8 + amplitude * 20}px`,
+                  "--bar-scale": `${0.35 + voiceLevel * (0.4 + amplitude * 0.25)}`,
+                  "--bar-opacity": `${0.42 + voiceLevel * 0.58}`,
+                } as CSSProperties}
+              />
+            ))}
+          </span>
         </span>
         <span className="state">Voix : {voiceState === "connected" ? "connectée" : voiceState === "failed" ? "indisponible" : voiceState === "idle" ? "en attente" : "connexion…"}</span>
       </div>
 
-      <audio ref={remoteAudio} autoPlay controls aria-label="Audio de l'autre participant" />
+      <audio className="remote-audio" ref={remoteAudio} autoPlay aria-label="Audio de l'autre participant" />
       {playbackBlocked && (
-        <button className="btn-quiet" onClick={() => void remoteAudio.current?.play().then(() => setPlaybackBlocked(false))}>
+        <button className="btn-quiet playback-action" onClick={() => void remoteAudio.current?.play().then(() => setPlaybackBlocked(false))}>
           Activer le son de l'autre participant
         </button>
       )}
