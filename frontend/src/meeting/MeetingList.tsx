@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, api, token, type Meeting } from "../api/client";
 import { useReadiness } from "../health/ReadinessProvider";
 import { creationBlockedReason, meetingCreationBlocked } from "../health/status";
@@ -12,6 +12,18 @@ const STATE_LABELS: Record<string, string> = {
   FAILED: "Échec",
   CANCELLED: "Annulée",
 };
+
+const STATE_FILTERS = [
+  "ALL",
+  "JOINABLE",
+  "LIVE",
+  "FINALIZING",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+] as const;
+
+type StateFilter = (typeof STATE_FILTERS)[number];
 
 function formatDate(iso: string): string {
   return new Intl.DateTimeFormat("fr-FR", {
@@ -28,6 +40,8 @@ export function MeetingList({ onOpenReview }: { onOpenReview: (meetingId: string
   const [error, setError] = useState<ApiError | null>(null);
   const [creating, setCreating] = useState(false);
   const [invite, setInvite] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [stateFilter, setStateFilter] = useState<StateFilter>("ALL");
 
   // The same readiness the banner above is rendering, from the same poll. A
   // meeting whose transcription engine is down records audio nobody can read,
@@ -65,6 +79,22 @@ export function MeetingList({ onOpenReview }: { onOpenReview: (meetingId: string
       setCreating(false);
     }
   }
+
+  const visibleMeetings = useMemo(() => {
+    if (!meetings) return [];
+    const wanted = query.trim().toLocaleLowerCase("fr-FR");
+    return meetings.filter((meeting) => {
+      const matchesQuery = !wanted || meeting.title.toLocaleLowerCase("fr-FR").includes(wanted);
+      const matchesState = stateFilter === "ALL" || meeting.state === stateFilter;
+      return matchesQuery && matchesState;
+    });
+  }, [meetings, query, stateFilter]);
+
+  const filtersActive = query.trim().length > 0 || stateFilter !== "ALL";
+  const clearFilters = () => {
+    setQuery("");
+    setStateFilter("ALL");
+  };
 
   return (
     <>
@@ -117,6 +147,35 @@ export function MeetingList({ onOpenReview }: { onOpenReview: (meetingId: string
         </div>
       )}
 
+      {meetings && meetings.length > 0 && (
+        <div className="meeting-filters" role="search" aria-label="Rechercher dans vos réunions">
+          <input
+            type="search"
+            value={query}
+            placeholder="Rechercher une réunion…"
+            aria-label="Rechercher une réunion"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <select
+            value={stateFilter}
+            aria-label="Filtrer les réunions par état"
+            onChange={(event) => setStateFilter(event.target.value as StateFilter)}
+          >
+            <option value="ALL">Tous les états</option>
+            {STATE_FILTERS.filter((state) => state !== "ALL").map((state) => (
+              <option key={state} value={state}>
+                {STATE_LABELS[state]}
+              </option>
+            ))}
+          </select>
+          {filtersActive && (
+            <button type="button" className="btn-quiet" onClick={clearFilters}>
+              Effacer
+            </button>
+          )}
+        </div>
+      )}
+
       {meetings === null ? (
         <div className="empty">Chargement…</div>
       ) : meetings.length === 0 ? (
@@ -124,9 +183,17 @@ export function MeetingList({ onOpenReview }: { onOpenReview: (meetingId: string
           <strong>Aucune réunion pour l'instant</strong>
           Donnez un titre ci-dessus pour créer la première.
         </div>
+      ) : visibleMeetings.length === 0 ? (
+        <div className="empty">
+          <strong>Aucune réunion trouvée</strong>
+          Modifiez votre recherche ou votre filtre pour afficher d'autres réunions.
+          <button type="button" className="btn-quiet empty-action" onClick={clearFilters}>
+            Effacer les filtres
+          </button>
+        </div>
       ) : (
         <div className="ledger">
-          {meetings.map((m) => (
+          {visibleMeetings.map((m) => (
             <div
               className="row row-clickable"
               key={m.id}

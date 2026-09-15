@@ -259,18 +259,27 @@ export function LiveMeeting({
           <h2>{joined.meeting.title}</h2>
           <p>{joined.participant.display_name}</p>
         </div>
-        {isHost && (
-          <button className="btn-quiet" onClick={() => void end()} disabled={ending}>
-            {ending ? "Finalisation…" : "Terminer la réunion"}
-          </button>
-        )}
-        <button className="btn-quiet" disabled={ending} onClick={toggleMute}>{muted ? "Réactiver le micro" : "Couper le micro"}</button>
-        <button className="btn-quiet" disabled={ending} onClick={() => void leave()}>Quitter</button>
+        <div className="meeting-actions" role="group" aria-label="Actions de la réunion">
+          {isHost && (
+            <button className="btn-quiet" onClick={() => void end()} disabled={ending}>
+              {ending ? "Finalisation…" : "Terminer la réunion"}
+            </button>
+          )}
+          <button className="btn-quiet" disabled={ending} onClick={toggleMute}>{muted ? "Réactiver le micro" : "Couper le micro"}</button>
+          <button className="btn-quiet" disabled={ending} onClick={() => void leave()}>Quitter</button>
+        </div>
       </div>
+
+      {ending && (
+        <div className="meeting-ending" role="status" aria-live="polite">
+          <span className="meeting-ending-mark" aria-hidden="true" />
+          La réunion est en cours de finalisation. Le compte rendu va s'ouvrir automatiquement.
+        </div>
+      )}
 
       <ParticipantPanel entries={participants} selfId={selfId} />
 
-      <div className="statusbar">
+      <div className="statusbar" data-muted={muted ? "true" : "false"} data-no-audio={noAudio ? "true" : "false"}>
         <span className="state">
           <span className="tessera" data-state={connection === "live" ? "LIVE" : ""} />
           {connection === "live" && stream
@@ -291,7 +300,7 @@ export function LiveMeeting({
             ))}
           </span>
         </span>
-        <span className="state">Voix : {voiceState === "connected" ? "connectée" : voiceState === "failed" ? "indisponible" : voiceState === "idle" ? "en attente" : "connexion…"}</span>
+        <span className="state">Voix directe : {voiceState === "connected" ? "connectée" : voiceState === "failed" ? "indisponible" : voiceState === "idle" ? "en attente" : "connexion…"}</span>
       </div>
 
       <audio className="remote-audio" ref={remoteAudio} autoPlay aria-label="Audio de l'autre participant" />
