@@ -45,6 +45,16 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  const viewKey = view.name === "live"
+    ? `${view.name}:${view.joined.meeting.id}`
+    : "meetingId" in view
+      ? `${view.name}:${view.meetingId}`
+      : view.name;
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [viewKey]);
+
   useEffect(() => {
     if (view.name !== "restore") return;
     let cancelled = false;

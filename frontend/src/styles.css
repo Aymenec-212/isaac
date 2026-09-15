@@ -1157,6 +1157,8 @@ select:disabled {
 .roster {
   margin: 0 0 16px;
   padding: 12px;
+  width: fit-content;
+  max-width: 100%;
   border: 1px solid var(--glass-edge);
   border-radius: var(--tile-panel);
   background: var(--glass-bg);
@@ -1178,6 +1180,39 @@ select:disabled {
 .statusbar {
   min-height: 58px;
   box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-edge);
+}
+
+.meeting-actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.meeting-actions button {
+  flex: 0 0 auto;
+}
+
+.meeting-ending {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: -8px 0 16px;
+  padding: 10px 13px;
+  border: 1px solid rgba(184, 128, 31, 0.28);
+  border-radius: var(--tile-panel);
+  background: var(--warn-wash);
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.meeting-ending-mark {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--saffron);
 }
 
 .statusbar .state {
@@ -1490,6 +1525,15 @@ audio {
   transition: opacity 90ms linear, transform 90ms linear;
 }
 
+.statusbar[data-no-audio="true"] .voice-wave {
+  opacity: 0.48;
+}
+
+.statusbar[data-muted="true"] .voice-wave {
+  filter: grayscale(1);
+  opacity: 0.3;
+}
+
 .remote-audio {
   position: absolute;
   width: 1px;
@@ -1506,6 +1550,43 @@ audio {
   margin: 0 0 18px;
 }
 
+.meeting-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(170px, 0.45fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--tile-panel);
+  background: var(--glass-bg);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.meeting-filters input,
+.meeting-filters select {
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.empty-action {
+  display: block;
+  margin: 16px auto 0;
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .meeting-filters {
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.28);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .meeting-filters {
+    background: var(--surface);
+    backdrop-filter: none;
+  }
+}
+
 @media (max-width: 720px) {
   .statusbar {
     grid-template-columns: 1fr;
@@ -1516,8 +1597,26 @@ audio {
     justify-self: start;
   }
 
+  .meeting-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .meeting-actions button {
+    width: 100%;
+  }
+
+  .meeting-actions button:first-child:nth-last-child(3) {
+    grid-column: 1 / -1;
+  }
+
   .meter {
     width: 100%;
     min-width: 0;
+  }
+
+  .meeting-filters {
+    grid-template-columns: 1fr;
   }
 }
