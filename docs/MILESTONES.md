@@ -1,5 +1,10 @@
 # Mosaïque — Phased Delivery and Human Gates
 
+M0's proposed ordered slices, measured exit targets and actual-tooling CI plan are
+in [M0_MIGRATION.md](M0_MIGRATION.md). This supplements the milestone boundaries
+below; it does not authorize implementation. [M0 report](reports/M0_BUILD_REPORT.md)
+records the baseline and open review gate.
+
 ## M0 — Architecture discovery (documentation only)
 - Map current code, behavior, tests and unknowns.
 - Inspect sanitized notes from prior Voxtral deployment.

@@ -1,5 +1,16 @@
 # Mosaïque — Architecture Direction (hypotheses until Phase 0 validates them)
 
+## M0 discovery update — 15 October 2026
+
+The detailed proposal is now [M0_DESIGN.md](M0_DESIGN.md), with
+[observed code/upstream evidence](M0_DISCOVERY.md),
+[incremental migration](M0_MIGRATION.md), and [threat model](M0_THREATS.md).
+These supersede the candidate choices below where more specific, but remain
+**proposed pending independent review and human approval**. In particular,
+Pipecat 1.12.0 does not expose `audio_in_user_tracks` and uses a shared resampler;
+main differs. No compatible multi-user runtime or batching performance is yet
+verified. [Proposed ADRs](decisions/M0-001-modular-monolith.md) record the decisions.
+
 ## Conceptual topology
 ```text
 Browser (authenticated SaaS frontend, LiveKit SDK)

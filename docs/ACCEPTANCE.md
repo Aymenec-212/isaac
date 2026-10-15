@@ -25,6 +25,28 @@ Every requirement is tracked as `not started`, `implemented/not verified`, `veri
 | OPS-03 | User-facing errors are actionable and durable work is recoverable after failed jobs | Fault injection + E2E |
 
 ## Expected milestone mapping
+
+### M0 status snapshot — 15 October 2026
+
+No enterprise criterion is verified by M0. Source reuse is not behavioral completion.
+Evidence: [builder report](reports/M0_BUILD_REPORT.md); future test/exit mapping:
+[ordered plan](M0_MIGRATION.md).
+
+| IDs | Status | Evidence/remaining work |
+|---|---|---|
+| AUTH-01..04 | not started | Prototype token checks exist; full account/membership/revocation journeys absent |
+| MEET-01 | not started | Existing peer media is not LiveKit Cloud acceptance |
+| MEET-02, HIST-01 | implemented/not verified | Prototype persistence/search/correction paths; no authenticated enterprise E2E run |
+| ASR-01..04 | not started | Legacy isolation tests do not prove Pipecat/Voxtral or real GPU benchmark |
+| AI-01 | implemented/not verified | Existing schema/citation validation; semantic support/uncertainty not fully validated |
+| AI-02, INT-01..03 | not started | Durable approval and connector workflow absent |
+| OPS-01..02 | not started | Privacy/retention and real CI need implementation; baseline checks have failures |
+| OPS-03 | implemented/not verified | Existing errors/retries; new worker/provider failure recovery not demonstrated |
+
+These statuses describe the complete criteria, not partial subfeatures. Paid/live
+checks are NOT RUN; M2 acceptance remains gated on authorization and real evidence.
+
+### Milestone allocation
 - Phase 0: requirements mapped, risks/unknowns recorded; no behavioral completion claim.
 - M1 SaaS foundation: AUTH-01..04, meeting entities scaffold and appropriate security checks.
 - M2 Live meeting/STT: MEET-01, ASR-01..04 (GPU bench can be marked blocked until approved/costed).
