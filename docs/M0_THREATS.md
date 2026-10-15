@@ -10,6 +10,7 @@ compromised browsers, untrusted model output and compromised external services.
 | Browser → identity/app | OIDC validation, cookie/CSRF/Origin protections, session revocation, rate limits; forged issuer/audience, invitation replay, session fixation, logout reuse | AUTH-01..04 |
 | Tenant → DB/API/WS/search/audio | Mandatory active membership + meeting access; composite tenant FKs and scoped reads/writes; fuzz every parent ID, WS cursor and object key with other tenant IDs | AUTH-03, HIST-01, INT-03 |
 | App → LiveKit | Server room/identity grants; no admin/browser secrets; explicit revoke cutoff and all admissions removed; race revoke/token issue, old/refreshed token reconnect | AUTH-04, MEET-01 |
+| Organizer end → Cloud shutdown | Durable end operation closes admission before disconnect/revoke/delete; include unused identities, refresh/same-second races, room recreation and crash after each Cloud call; remain visibly FINALIZING until closure confirmed | MEET-01..02, AUTH-04, OPS-03 |
 | LiveKit → media worker | Identity binding, microphone-only routing, generation fencing, independent resampling/VAD/STT; spoof metadata, overlap, duplicate device and stale republish callbacks | ASR-01..03 |
 | Worker → gateway/GPU | TLS, short-lived header credential scoped to worker/meeting, key rotation, payload/time/rate limits, private loopback vLLM; unauthorized socket, oversized frame, expired credential and stalled consumer | ASR-02, INT-03, OPS-03 |
 | Worker/job → DB | Leases and fencing, tenant binding from persisted job, reauthorization for privileged work, bounded retries; crash after lease expiry and stale worker writes | AUTH-03, ASR-03, OPS-03 |
@@ -43,8 +44,11 @@ deletion an explicitly approved action, not an implicit cascading side effect.
    bounds and subscribe-only operation before pinning a compatible bundle.
 2. **M2 blocker:** vLLM long-session/context/KV behavior, rotation loss, sustained
    1/2/4-stream scheduling and latency. No GPU benchmark was run in M0.
-3. **M2/M3 decision:** acceptable coarse timing and evidence-window length; accurate
-   word alignment would need a separately justified post-process or protocol support.
+3. **M2 closure blocker:** approve and qualify per-language WER/CER, maximum evidence
+   window, timing error after mute/rejoin and finalization-delay thresholds using
+   the [quality gates](M0_DISCOVERY.md#m2-transcript-quality-decision-gates-m0-r3).
+   Unset or failed limits need a documented product decision before M2 can close;
+   word alignment may require a separately justified process/protocol change.
 4. **M1 approval:** Auth0 provider suitability, region/cost, session lifetime and
    private-meeting/administrator policy. App memberships remain locally authoritative.
 5. **M4 blocker:** Linear OAuth installation privileges, destination feasibility,

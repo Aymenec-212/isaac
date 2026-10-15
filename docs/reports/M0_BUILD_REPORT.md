@@ -1,5 +1,11 @@
 # Builder Milestone Report — M0 architecture discovery only
 
+Historical report for d8204d4. See [M0 review fixes](M0_FIX_REPORT.md) for the
+corrected proposal and new verification. The missing fixtures below were deleted
+by 7412d8d relative to main 6e9e85bd3806cf7f5c0205ece97e285f8d62da9e: this was
+a regression within the reviewed branch, not an inherited main defect. They are
+restored during M0 re-review rather than deferred to M1.
+
 - Branch / commit / base: `codex/m0-architecture`; this documentation commit;
   inspected/tested application base `7412d8d9b6cc66f928d4cf01a57d2a65b20127fb`.
   Exact resulting documentation SHA is supplied in the final handoff and obtainable

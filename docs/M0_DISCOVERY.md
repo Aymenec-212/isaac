@@ -4,6 +4,13 @@ Observed 15 October 2026 against application base
 `7412d8d9b6cc66f928d4cf01a57d2a65b20127fb`. Source inspection is not runtime proof.
 See [executed checks](reports/M0_BUILD_REPORT.md). Paths below are repository-relative.
 
+Review correction: the requested comparison base is `main` at
+`6e9e85bd3806cf7f5c0205ece97e285f8d62da9e`; `7412d8d` is only the Builder's
+immediate starting commit. That intervening branch commit deleted regression
+fixtures present on main. M0-R1 is a branch regression, not deferred M1 cleanup.
+The three required fixtures are restored unchanged from main; see
+[provenance](mosaique-b1-main/PROVENANCE.md) and [fix evidence](reports/M0_FIX_REPORT.md).
+
 ## Preserve, adapt and retire matrix
 
 | Actual module/files | Observed behavior | Proposal and preservation condition |
@@ -40,8 +47,9 @@ These are source-observed limitations, not reproduced exploit claims.
 - Unit suite after allowing localhost sockets: **326 pass, 13 fail, 9 skip**.
   Eleven failures need `docs/mosaique-b1-main/b1-report.json`; two need
   `docs/slice4-last-test-report.json`. Nine skips also depend on those reports.
-  Restore only sanitized, licensed fixtures or replace with explicit synthetic
-  regression data; never import customer recordings to make tests green.
+  These are historical results at d8204d4, not the corrected branch result.
+  M0-R1 restores the reports and token log from main without changing assertions;
+  post-fix results are in the fix report. No audio recordings were restored.
 - Mypy: eight MLX adapter attribute/export errors. Ruff passes. Frontend 115 tests,
   typecheck and build pass; lint fails because ESLint is absent from tooling.
 - Contrast script reports 43 passing checked pairs and three acknowledged gap
@@ -137,3 +145,26 @@ at two streams, measured four-stream result even if it fails; cleanup within ten
 seconds after forced cancellation. Latency target misses require a reviewed
 capacity/product decision, never relabeling an estimate as acceptance. Long-session
 KV growth, context limits and rotation quality remain gating research questions.
+
+### M2 transcript-quality decision gates (M0-R3)
+
+ASR-03/04 and AI-01 require usable evidence, not just low interim latency. The
+following are mandatory M2 closure gates. Numerical thresholds are **unset** in
+M0; this is an explicit closure blocker, not a waiver. Exploratory measurements
+may inform them, but the product owner must approve numbers, language/dialect
+scope, normalization rules and evaluation corpus before a separate held-out
+qualification run. Report all trial results, not just the best run.
+
+| Gate | Measurement / required threshold record | Failure handling |
+|---|---|---|
+| Language-specific accuracy | Separate maximum WER and CER for French, English and the intended Arabic dialect(s); document normalization, word/character counts, speaker/noise/overlap strata and held-out samples. Report each language at 1/2/4 admitted streams, not a pooled average | Any supported-language threshold missing or missed blocks closure; a reduced language/capacity scope needs an explicit reviewed product decision |
+| Maximum evidence window | Approved hard maximum duration in seconds for a finalized citable segment; report p95/max and citation playback span including any padding. Include continuous speech, long pauses and rotation boundaries | A five-minute rotation is never automatic permission for five-minute evidence. Oversized windows require endpoint/session redesign or an explicit scope decision |
+| Source-time accuracy | Approved p95 AND maximum absolute boundary error in ms against known source markers, separately for start/end and cross-speaker alignment before/after mute, rejoin, republish, loss and worker restart | Do not conceal drift by resetting clocks or averaging pre/post-rejoin. Unknown/unbounded alignment cannot count as passing; mark gaps and fix or decide product scope |
+| Finalization delay | Approved p95 AND maximum delay from annotated source utterance end to **durable final visible to reviewer**; report endpoint wait, ASR, DB and delivery components, including uninterrupted speech, rotation, leave/end | Fast interims cannot compensate for late finals. Missing/missed thresholds block closure; failure paths need bounded terminal gaps, not indefinite interim text |
+
+Track each threshold's approver/date, corpus revision, model/dependency pins,
+measured value and pass/fail in the M2 report. A missing threshold, insufficient
+samples or failed run keeps M2 open until a documented product decision specifies
+remediation or a reviewed scope/criterion change and qualification is repeated
+where behavior changed. Neither Builder nor Reviewer may silently weaken criteria.
+Retain the existing attribution, gap, resource and authorized GPU gates as well.

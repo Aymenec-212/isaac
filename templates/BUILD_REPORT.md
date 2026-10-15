@@ -1,7 +1,7 @@
 # Builder Milestone Report — [M# / scope]
 
-- Branch / commit / base: 
-- Acceptance IDs in scope: 
+- Branch / commit / base:
+- Acceptance IDs in scope:
 - Status: IMPLEMENTED / PARTIAL / BLOCKED
 
 ## User-visible behavior actually demonstrated

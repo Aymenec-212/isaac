@@ -32,6 +32,12 @@ No enterprise criterion is verified by M0. Source reuse is not behavioral comple
 Evidence: [builder report](reports/M0_BUILD_REPORT.md); future test/exit mapping:
 [ordered plan](M0_MIGRATION.md).
 
+Re-review update: [M0 fixes](reports/M0_FIX_REPORT.md) restores the main regression
+fixtures for OPS-02, adds the MEET-01/02 + AUTH-04 durable shutdown test contract,
+and makes ASR-03/04 + AI-01 transcript-quality thresholds mandatory M2 closure
+gates. These are fixture repair and specification changes, not enterprise acceptance
+verification; criterion wording and statuses below are unchanged.
+
 | IDs | Status | Evidence/remaining work |
 |---|---|---|
 | AUTH-01..04 | not started | Prototype token checks exist; full account/membership/revocation journeys absent |

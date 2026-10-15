@@ -106,10 +106,69 @@ never authorize access.
 | Job / worker lease | Tenant, input version, attempts, owner/expiry/fencing epoch; bounded retries |
 
 Retain CREATED → JOINABLE → LIVE → FINALIZING → COMPLETED and FAILED/CANCELLED
-branches with existing guards. End is idempotent: deny new audio, flush with a
-deadline, persist finals or explicit gaps, freeze snapshot and enqueue extraction
-in the completion transaction. Extraction failure does not invalidate a completed
+branches with existing guards. Extraction failure does not invalidate a completed
 meeting. Worker crash interrupts transcription; it must not silently complete it.
+
+### Durable meeting end and Cloud shutdown (M0-R2)
+
+The Meetings module owns one idempotent end operation per meeting, including its
+Cloud shutdown progress. A transcript flush is not evidence that the call ended.
+
+1. Under the same meeting/admission lock used for token issuance, authorize the
+   organizer, enter FINALIZING and persist end-operation ID, requested-at/cutoff,
+   closed admission generation and a retryable shutdown job. Repeated end requests
+   return this operation. Invalidate **all issued admissions**, including identities
+   whose tokens were never used, plus worker admissions. No subsequent token mint,
+   room creation or worker restart may reopen this room generation. An in-flight
+   token response after this transaction is already in the revocation inventory.
+2. Tell the worker to stop accepting new input and drain only already accepted
+   audio to a recorded per-track cutoff, within ten seconds; late media events
+   cannot extend that boundary. In parallel disconnect Cloud participants: do not
+   keep a conversation running while waiting for ASR. Preserve buffered audio for
+   bounded finalization; forced disconnection or missing worker acknowledgement
+   yields explicit uncertain ranges. UI immediately shows **ending**, not completed.
+3. Reconcile every issued identity with Cloud RemoveParticipant and an explicit
+   revoke_token_ts, including disconnected/never-connected identities; include any
+   unexpected live identities discovered while listing the room. Record each
+   acknowledgement durably. The cutoff must cover refreshed tokens and same-second
+   nbf values: after removal stops refresh, use a strictly later supported cutoff
+   within Cloud's clock window, not the default buffered cutoff. Retry after delay
+   with a fresh valid cutoff when recovering an old operation. The selected SDK and
+   Cloud behavior must prove this rather than assume integer timestamp equality
+   is sufficient. Then DeleteRoom disconnects any residual room participants.
+4. Persist room-deletion confirmation and revocation outcomes. Room absence alone
+   is insufficient: an unused valid token might recreate it. Never reuse the room
+   name, retain its application tombstone and verify the selected Cloud semantics
+   reject old/refreshed/unused tokens even after deletion/recreation attempts. If
+   revocation does not survive deletion, keep the room quarantined until the
+   validated token-validity horizon has elapsed before deleting it. An unproven
+   horizon or provider behavior blocks completion and M2 approval, not just a test.
+5. Only after media shutdown/rejoin prevention is confirmed AND final segments or
+   gaps are durable, atomically freeze the snapshot, enqueue extraction once and
+   mark COMPLETED. Transcript history can remain readable during FINALIZING, with
+   explicit shutdown/unsaved status. Cloud failure leaves **ending — media shutdown
+   pending** and an actionable retry/error, never a false completed state.
+
+Persist step outcomes, attempt count, lease/fencing epoch and next retry. Crash
+after a successful Cloud call but before acknowledgement is reconciled safely;
+no process-local task is the sole owner. Use bounded exponential retries and alert
+after the operational deadline; exhausted automatic retries require operator retry
+while admission remains closed. No database transaction stays open over Cloud calls.
+An outage may delay disconnection; the product must disclose that limitation.
+
+Cloud [participant removal](https://docs.livekit.io/intro/basics/rooms-participants-tracks/participants/)
+supports explicit cutoff revocation, including absent participants, with a cutoff
+within 60 seconds of server time. [DeleteRoom](https://docs.livekit.io/intro/basics/rooms-participants-tracks/rooms/)
+disconnects participants; this alone is not a documented permanent room ban.
+The composition above is our proposed contract, still requiring real Cloud tests.
+
+M2 tests (MEET-01/02, AUTH-04, ASR-02/03, OPS-03): two connected clients lose media
+after end; unused and refreshed tokens cannot rejoin directly; token issuance racing
+end is included in revocation; duplicate end calls create one operation/snapshot/job;
+ASR stall produces a gap without delaying disconnect; Cloud timeout remains pending;
+crash before/after each Cloud call and before completion resumes safely; same-second
+tokens, stale workers and room recreation cannot reopen admission. Simulated failures
+prove orchestration only; real Cloud tests prove token/disconnection semantics.
 
 ## Media state and bounded failure
 
@@ -158,6 +217,20 @@ snapshot support reconnect; uncommitted interims may disappear. ASR disconnect
 starts a new generation and gap, not an assumed provider resume. Rotation uses
 a new socket and bounded handoff; overlap/VAD-cut policy requires boundary tests.
 
+Cursor allocation must be commit-order safe: a sequence allocated by an uncommitted
+transaction cannot be skipped when a later transaction commits first. Serialize
+durable event numbering per meeting in the committing transaction (or prove an
+equivalent safe replay algorithm). Test concurrent writers with inverted commit
+order, rollback, reconnect at a high-water cursor and snapshot-plus-replay races;
+no committed event may be permanently missed. This does not order speaker times.
+
+Five-minute ASR rotation is a resource experiment, not a permitted evidence span.
+Endpointing/finalization must satisfy the separate M2 accuracy, evidence-window,
+timing-error and final-delay gates in [discovery](M0_DISCOVERY.md#m2-transcript-quality-decision-gates-m0-r3).
+If the protocol cannot produce usable bounded evidence windows, change the session
+strategy or obtain a reviewed product decision before closing M2; do not silently
+carry an unusable transcript into M3.
+
 ## Intelligence, approval and Linear
 
 Reuse structured output/evidence validation and provider seam, then add owner,
@@ -183,3 +256,8 @@ write is ambiguous; reconcile before any repeat. Provider idempotency and lookup
 reliability remain unverified until M4 sandbox tests. If absence cannot be proven,
 require manual reconciliation, not blind retry. Local uniqueness is not exactly-once
 external effects. Start with scoped read-only status polling.
+
+A worker crash after provider acceptance but before persisting the ticket ID is
+also ambiguous, even without a recorded timeout. Lease recovery must reconcile a
+`sending` command before retrying; it must never reset it blindly to `pending`.
+M4 tests kill the worker at this boundary and check the provider for duplicates.

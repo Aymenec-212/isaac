@@ -23,7 +23,8 @@ Proposal only; no database inspected, migrated or reset in M0.
    indexes with bounded lock time where appropriate. Persist migration checkpoints
    and run read comparisons before enforcing new non-null fields.
 5. M2 adds room/admission/track/ASR generation metadata, worker leases and durable
-   transcript events/gaps. Existing audio_sessions remain readable at 24 kHz;
+   transcript events/gaps and durable end-operation/Cloud-shutdown progress.
+   Existing audio_sessions remain readable at 24 kHz;
    new sessions record actual 16 kHz format. Never reinterpret old sample counts.
    Persist final segments during M2; M3 is not permission to leave live data volatile.
 6. M3 adds revision history and extraction snapshots. Import the existing raw final
@@ -50,14 +51,33 @@ before merge. Proposed numbers below are test targets, not measured outcomes.
 
 | Slice | Acceptance IDs | Behavior, tests and exit condition |
 |---|---|---|
-| M0 architecture | All IDs mapped | Docs-only diff, reproducible baseline failures, proposed ADRs and explicit research gates; stop for review |
-| M1a baseline + identity | AUTH-01, OPS-02 foundation | Repair missing sanitized fixtures, MLX type and frontend lint setup; establish actual CI. Two real accounts register/login/logout/recover; expired/wrong-issuer/forged sessions fail |
+| M0 architecture | All IDs mapped | Planning plus restoration of existing main regression fixtures (M0-R1); compare both main and immediate Builder base, proposed ADRs and explicit research gates; stop for review |
+| M1a baseline + identity | AUTH-01, OPS-02 foundation | Preserve fixtures restored in M0; repair MLX type and frontend lint setup; establish actual CI. Two real accounts register/login/logout/recover and edit/reload their profile; expired/wrong-issuer/forged sessions fail |
 | M1b workspaces + migration | AUTH-02..04 | Two orgs and one user in both; invitation replay/expiry/address mismatch, last-owner and IDOR tests. Deny removed user on every application surface. Rehearse 0003 upgrade/backfill/rollback compatibility and preserve all history hashes. LiveKit revocation subcase remains deferred to M2 |
 | M2a dependency/transport gate | MEET-01, ASR-01..02, AUTH-04 | Resolve Pipecat fixes and lock exact SDKs; CPU identity/queue/cancellation tests. Then two real accounts hear overlapping audio on LiveKit, mute/leave/republish, unauthorized token and refreshed-token revocation tests. No custom transport rewrite before upstream assessment |
 | M2b transcript + inference | ASR-01..04, OPS-03 foundation | Durable finals/gaps and deterministic revisions/source-time tests; reject stale worker epochs. Execute 1/2/4 GPU experiment from discovery with approval. Report p50/p95, memory, drops, cold start and costs; zero unexplained attribution errors. Cannot close ASR-04 from fake tests |
 | M3 history + intelligence | MEET-02, HIST-01, AI-01..02 | History after refresh/logout/restart; corrections/search preserve raw evidence; unsupported owner/deadline and prompt-injection fixtures; stale approval rejection. Kill/restart jobs between claim/provider/store and recover without duplicate durable outputs |
 | M4 Linear vertical slice | INT-01..03 | Approved exact proposal creates one linked sandbox ticket. Double-click, parallel dispatch, revoke-before-send, token rotation and ambiguous provider timeout tests. Prove reconcile behavior or explicitly stop for manual reconciliation; no blind resend |
 | M5 pilot readiness | OPS-01..03 + regression of all | Verify consent/retention/deletion including jobs, objects and backup policy; restore rehearsal, alert/incident runbooks, actionable degraded UI. All required CI and separately authorized live checks green; documented privacy/residency decisions and human pilot approval |
+
+Additional explicit exit tests from M0 review (all planned, not implemented):
+
+- M1b / AUTH-02..03: owner changes workspace name/settings and sees them after
+  reload and organization switching; ordinary member and other-tenant writes fail.
+- M2a / MEET-01/02, AUTH-04, OPS-03: execute the design's durable meeting-end matrix,
+  including connected clients, unused/refreshed tokens, same-second cutoff,
+  concurrent issuance, Cloud outage, room recreation and crash/restart at each step.
+  M3 history tests must distinguish pending shutdown from completed meetings.
+- M2b / ASR-03/04, AI-01: all four transcript-quality gates in discovery need approved
+  numbers and qualifying evidence. Unset/failed gates prevent M2 closure without
+  documented product disposition; five-minute rotation does not set evidence length.
+  Test durable cursors with inverted commit order, rollback and snapshot/replay races.
+- M4 / INT-01..03 and PRODUCT: persist explicit destination team/project/owner mapping,
+  reject foreign workspace and unmapped/unauthorized owner choices, and do not infer
+  provider owners from similar names. After ticket creation, a sandbox status change
+  must appear on the linked action after polling and survive reload; revoked access
+  produces an actionable status error. Kill a sending worker after provider success
+  but before local persistence and prove reconciliation prevents blind duplicate create.
 
 Privacy disclosure, tenant security and recoverability start with their first
 affected feature; M5 validates them, rather than introducing them late. Once an

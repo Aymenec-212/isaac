@@ -1,0 +1,610 @@
+{
+  "scenario": "slice4-last-test.json",
+  "speed": 1.0,
+  "meeting_id": "01M20SNM2P34G1ASZTHDY5ZGZ2",
+  "wall_seconds": 117.097,
+  "stream_seconds": 116.4,
+  "broadcast": {
+    "sockets": 1,
+    "reached_every_socket": true,
+    "roster_complete": true,
+    "views_identical": true,
+    "finals_all_persisted": true
+  },
+  "participants": [
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "start_ms": 0,
+      "frames_sent": 1455,
+      "speaking_transitions": 60,
+      "disconnects": 0,
+      "duplicates_sent": 0,
+      "resumed": false
+    }
+  ],
+  "totals": {
+    "segments": 30,
+    "deltas": 345,
+    "speedup": 0.99,
+    "latency_meaningful": true,
+    "first_word_latency_ms_p50": 968.0,
+    "first_word_latency_ms_p95": 1934.3,
+    "pipeline_latency_ms_p50": 1029.4,
+    "pipeline_latency_ms_p95": 1994.7
+  },
+  "transcript": [
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 0,
+      "start_ms": 624,
+      "text": "Bonjour à"
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 1,
+      "start_ms": 1104,
+      "text": "tous."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 2,
+      "start_ms": 2224,
+      "text": "Aujourd'hui, j'aimerais prendre quelques minutes pour vous parler de l'évolution de notre rapport au temps et à la"
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 3,
+      "start_ms": 7504,
+      "text": "technologie."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 4,
+      "start_ms": 8544,
+      "text": "Pendant longtemps, nous avons cherché à aller toujours plus vite, que ce soit dans nos déplacements quotidiens, dans notre manière de communiquer ou même dans nos loisirs."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 5,
+      "start_ms": 17264,
+      "text": "La vitesse est devenue une valeur"
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 6,
+      "start_ms": 19344,
+      "text": "cardinale."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 7,
+      "start_ms": 20384,
+      "text": "Pourtant, lorsqu'on prend un peu de recul, on s'aperçoit que cette accélération permanente a un coût non"
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 8,
+      "start_ms": 26064,
+      "text": "négligeable."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 9,
+      "start_ms": 26944,
+      "text": "Par exemple, songez à nos boîtes de réception ou à nos téléphones portables."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 10,
+      "start_ms": 31344,
+      "text": "Chaque jour, nous recevons des dizaines, voire des centaines de"
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 11,
+      "start_ms": 34864,
+      "text": "notifications."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 12,
+      "start_ms": 35744,
+      "text": "Dès le réveil, vers 7 heures ou 7 heures et demi, la première chose que beaucoup d'entre nous font, c'est de regarder leur écran."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 13,
+      "start_ms": 42384,
+      "text": "On vérifie les courriels, on consulte les actualités, on survole les réseaux sociaux, et avant même d'avoir posé le pied par terre, notre esprit est déjà saturé d'informations"
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 14,
+      "start_ms": 52064,
+      "text": "disparates."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 15,
+      "start_ms": 53424,
+      "text": "Récemment, j'ai tenté une expérience assez simple."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 16,
+      "start_ms": 56304,
+      "text": "Passer tout un week-end sans aucun appareil connecté."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 17,
+      "start_ms": 59424,
+      "text": "Pas d'ordinateur, pas de montre intelligente et surtout un téléphone éteint et rangé au fond d'un tiroir."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 18,
+      "start_ms": 65984,
+      "text": "Au début, je dois l'avouer, la sensation a été plutôt étrange."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 19,
+      "start_ms": 69744,
+      "text": "Il y a ce réflexe presque machinal de chercher son téléphone dans sa poche toutes les dix minutes."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 20,
+      "start_ms": 74384,
+      "text": "On ressent un léger vide, une sorte de petite anxiété"
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 21,
+      "start_ms": 77744,
+      "text": "silencieuse."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 22,
+      "start_ms": 78704,
+      "text": "Mais très vite, au bout de quelques heures, ce sentiment s'est dissipé pour laisser place à un calme"
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 23,
+      "start_ms": 83744,
+      "text": "inattendu."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 24,
+      "start_ms": 84624,
+      "text": "J'ai redécouvert le plaisir de lire un livre pendant deux heures consécutives, sans être"
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 25,
+      "start_ms": 88944,
+      "text": "interrompu, d'aller marcher en forêt, sans vérifier l'heure, et de préparer un bon repas en étant simplement attentif aux odeurs et aux gestes du moment."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 26,
+      "start_ms": 97184,
+      "text": "Je ne dis pas qu'il faut rejeter la modernité ou vivre comme des ermites."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 27,
+      "start_ms": 100544,
+      "text": "Les outils technologiques nous rendent des services inestimables au quotidien."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 28,
+      "start_ms": 104064,
+      "text": "Mais il est devenu essentiel de réapprendre à fixer des limites claires."
+    },
+    {
+      "display_name": "Ayman",
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "sequence": 29,
+      "start_ms": 107904,
+      "text": "Car finalement, le véritable luxe aujourd'hui, ce n'est peut-être pas d'avoir accès à tout en un clic, mais plutôt de savoir s'offrir le temps du silence et de"
+    }
+  ],
+  "segments": [
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 0,
+      "segment_id": "01M20SNQ0E8FDSDKSPZ5A0FRQS",
+      "text": "Bonjour à",
+      "start_ms": 624,
+      "end_ms": 944,
+      "duration_ms": 320,
+      "first_word_latency_ms": 1449.4,
+      "pipeline_latency_ms": 1509.0
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 1,
+      "segment_id": "01M20SNQ4AA6JWZYDSB9RN2GRH",
+      "text": "tous.",
+      "start_ms": 1104,
+      "end_ms": 1264,
+      "duration_ms": 160,
+      "first_word_latency_ms": 1982.4,
+      "pipeline_latency_ms": 2041.3
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 2,
+      "segment_id": "01M20SNWPS6YP6EB16KNR7BMPZ",
+      "text": "Aujourd'hui, j'aimerais prendre quelques minutes pour vous parler de l'évolution de notre rapport au temps et à la",
+      "start_ms": 2224,
+      "end_ms": 7104,
+      "duration_ms": 4880,
+      "first_word_latency_ms": 1277.2,
+      "pipeline_latency_ms": 1336.0
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 3,
+      "segment_id": "01M20SNX0HGRGWH7Z33GWJ2C32",
+      "text": "technologie.",
+      "start_ms": 7504,
+      "end_ms": 7744,
+      "duration_ms": 240,
+      "first_word_latency_ms": 1604.7,
+      "pipeline_latency_ms": 1664.7
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 4,
+      "segment_id": "01M20SP5H2H4YAPNJJ01541BDN",
+      "text": "Pendant longtemps, nous avons cherché à aller toujours plus vite, que ce soit dans nos déplacements quotidiens, dans notre manière de communiquer ou même dans nos loisirs.",
+      "start_ms": 8544,
+      "end_ms": 17104,
+      "duration_ms": 8560,
+      "first_word_latency_ms": 881.7,
+      "pipeline_latency_ms": 940.7
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 5,
+      "segment_id": "01M20SP854S2XQQJTW6N4E69J5",
+      "text": "La vitesse est devenue une valeur",
+      "start_ms": 17264,
+      "end_ms": 18784,
+      "duration_ms": 1520,
+      "first_word_latency_ms": 965.8,
+      "pipeline_latency_ms": 1026.0
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 6,
+      "segment_id": "01M20SP8JF5YXYCS4CM8YCY9BN",
+      "text": "cardinale.",
+      "start_ms": 19344,
+      "end_ms": 19664,
+      "duration_ms": 320,
+      "first_word_latency_ms": 1603.6,
+      "pipeline_latency_ms": 1662.9
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 7,
+      "segment_id": "01M20SPES99K1MWVZE8ME5CWZW",
+      "text": "Pourtant, lorsqu'on prend un peu de recul, on s'aperçoit que cette accélération permanente a un coût non",
+      "start_ms": 20384,
+      "end_ms": 25584,
+      "duration_ms": 5200,
+      "first_word_latency_ms": 1285.1,
+      "pipeline_latency_ms": 1344.4
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 8,
+      "segment_id": "01M20SPEZG0D6TMX76M8X691VV",
+      "text": "négligeable.",
+      "start_ms": 26064,
+      "end_ms": 26464,
+      "duration_ms": 400,
+      "first_word_latency_ms": 1444.7,
+      "pipeline_latency_ms": 1504.3
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 9,
+      "segment_id": "01M20SPK90V3PZE71TTVH65R7P",
+      "text": "Par exemple, songez à nos boîtes de réception ou à nos téléphones portables.",
+      "start_ms": 26944,
+      "end_ms": 30944,
+      "duration_ms": 4000,
+      "first_word_latency_ms": 962.8,
+      "pipeline_latency_ms": 1022.4
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 10,
+      "segment_id": "01M20SPQC4Z3K4Z9P4G5E454B4",
+      "text": "Chaque jour, nous recevons des dizaines, voire des centaines de",
+      "start_ms": 31344,
+      "end_ms": 34384,
+      "duration_ms": 3040,
+      "first_word_latency_ms": 809.9,
+      "pipeline_latency_ms": 869.6
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 11,
+      "segment_id": "01M20SPQJFQ2GY64QN0DXJPZXX",
+      "text": "notifications.",
+      "start_ms": 34864,
+      "end_ms": 35184,
+      "duration_ms": 320,
+      "first_word_latency_ms": 1443.2,
+      "pipeline_latency_ms": 1503.0
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 12,
+      "segment_id": "01M20SPY223R809T68SK27RT80",
+      "text": "Dès le réveil, vers 7 heures ou 7 heures et demi, la première chose que beaucoup d'entre nous font, c'est de regarder leur écran.",
+      "start_ms": 35744,
+      "end_ms": 42144,
+      "duration_ms": 6400,
+      "first_word_latency_ms": 643.6,
+      "pipeline_latency_ms": 703.5
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 13,
+      "segment_id": "01M20SQ8CD7HTJJ450K1HWE8T5",
+      "text": "On vérifie les courriels, on consulte les actualités, on survole les réseaux sociaux, et avant même d'avoir posé le pied par terre, notre esprit est déjà saturé d'informations",
+      "start_ms": 42384,
+      "end_ms": 51824,
+      "duration_ms": 9440,
+      "first_word_latency_ms": 964.5,
+      "pipeline_latency_ms": 1024.5
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 14,
+      "segment_id": "01M20SQ8VA9BYWZYDTN11FA5ET",
+      "text": "disparates.",
+      "start_ms": 52064,
+      "end_ms": 52384,
+      "duration_ms": 320,
+      "first_word_latency_ms": 1934.3,
+      "pipeline_latency_ms": 1994.7
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 15,
+      "segment_id": "01M20SQBN3R438TWKMKQSN5ZAJ",
+      "text": "Récemment, j'ai tenté une expérience assez simple.",
+      "start_ms": 53424,
+      "end_ms": 55664,
+      "duration_ms": 2240,
+      "first_word_latency_ms": 1045.9,
+      "pipeline_latency_ms": 1106.3
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 16,
+      "segment_id": "01M20SQEPGZR1SKNP3VBE71QC9",
+      "text": "Passer tout un week-end sans aucun appareil connecté.",
+      "start_ms": 56304,
+      "end_ms": 59184,
+      "duration_ms": 2880,
+      "first_word_latency_ms": 805.7,
+      "pipeline_latency_ms": 866.3
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 17,
+      "segment_id": "01M20SQN3HEH9ZA819E1FYQGY9",
+      "text": "Pas d'ordinateur, pas de montre intelligente et surtout un téléphone éteint et rangé au fond d'un tiroir.",
+      "start_ms": 59424,
+      "end_ms": 65424,
+      "duration_ms": 6000,
+      "first_word_latency_ms": 1366.6,
+      "pipeline_latency_ms": 1427.2
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 18,
+      "segment_id": "01M20SQRS0261AK69E0YWY6S4S",
+      "text": "Au début, je dois l'avouer, la sensation a été plutôt étrange.",
+      "start_ms": 65984,
+      "end_ms": 69424,
+      "duration_ms": 3440,
+      "first_word_latency_ms": 884.3,
+      "pipeline_latency_ms": 945.1
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 19,
+      "segment_id": "01M20SQXA1JE9KK5H9P9NE802V",
+      "text": "Il y a ce réflexe presque machinal de chercher son téléphone dans sa poche toutes les dix minutes.",
+      "start_ms": 69744,
+      "end_ms": 73984,
+      "duration_ms": 4240,
+      "first_word_latency_ms": 641.5,
+      "pipeline_latency_ms": 702.4
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 20,
+      "segment_id": "01M20SR1CDGR071W8G9WCD6Y7M",
+      "text": "On ressent un léger vide, une sorte de petite anxiété",
+      "start_ms": 74384,
+      "end_ms": 77424,
+      "duration_ms": 3040,
+      "first_word_latency_ms": 885.0,
+      "pipeline_latency_ms": 946.1
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 21,
+      "segment_id": "01M20SR1GXJJ3TKJBJH5VZ72MX",
+      "text": "silencieuse.",
+      "start_ms": 77744,
+      "end_ms": 78144,
+      "duration_ms": 400,
+      "first_word_latency_ms": 1521.3,
+      "pipeline_latency_ms": 1582.5
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 22,
+      "segment_id": "01M20SR708A8KF9GJXE4044C1E",
+      "text": "Mais très vite, au bout de quelques heures, ce sentiment s'est dissipé pour laisser place à un calme",
+      "start_ms": 78704,
+      "end_ms": 83184,
+      "duration_ms": 4480,
+      "first_word_latency_ms": 808.2,
+      "pipeline_latency_ms": 869.5
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 23,
+      "segment_id": "01M20SR7A2KDBZ13QKK1ADREC5",
+      "text": "inattendu.",
+      "start_ms": 83744,
+      "end_ms": 84064,
+      "duration_ms": 320,
+      "first_word_latency_ms": 1446.4,
+      "pipeline_latency_ms": 1507.8
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 24,
+      "segment_id": "01M20SRC5ZCNCW9BVERANKTYYF",
+      "text": "J'ai redécouvert le plaisir de lire un livre pendant deux heures consécutives, sans être",
+      "start_ms": 84624,
+      "end_ms": 88464,
+      "duration_ms": 3840,
+      "first_word_latency_ms": 968.0,
+      "pipeline_latency_ms": 1029.4
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 25,
+      "segment_id": "01M20SRKJJQFE49VN8J1JZNQ60",
+      "text": "interrompu, d'aller marcher en forêt, sans vérifier l'heure, et de préparer un bon repas en étant simplement attentif aux odeurs et aux gestes du moment.",
+      "start_ms": 88944,
+      "end_ms": 96544,
+      "duration_ms": 7600,
+      "first_word_latency_ms": 1603.5,
+      "pipeline_latency_ms": 1665.0
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 26,
+      "segment_id": "01M20SRPVGXTSJ2S8J5W9YYY70",
+      "text": "Je ne dis pas qu'il faut rejeter la modernité ou vivre comme des ermites.",
+      "start_ms": 97184,
+      "end_ms": 100384,
+      "duration_ms": 3200,
+      "first_word_latency_ms": 723.3,
+      "pipeline_latency_ms": 785.2
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 27,
+      "segment_id": "01M20SRT9JKAAXH30D0NT0K9TH",
+      "text": "Les outils technologiques nous rendent des services inestimables au quotidien.",
+      "start_ms": 100544,
+      "end_ms": 103744,
+      "duration_ms": 3200,
+      "first_word_latency_ms": 884.2,
+      "pipeline_latency_ms": 946.0
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 28,
+      "segment_id": "01M20SRY1G5H0E2BH0BTTTKXHW",
+      "text": "Mais il est devenu essentiel de réapprendre à fixer des limites claires.",
+      "start_ms": 104064,
+      "end_ms": 107424,
+      "duration_ms": 3360,
+      "first_word_latency_ms": 727.2,
+      "pipeline_latency_ms": 789.3
+    },
+    {
+      "participant_id": "01M20SNM3DB4QNW05F5XWX5MQS",
+      "display_name": "Ayman",
+      "sequence": 29,
+      "segment_id": "01M20SS7GFCK6WAPNT8J19ZVJH",
+      "text": "Car finalement, le véritable luxe aujourd'hui, ce n'est peut-être pas d'avoir accès à tout en un clic, mais plutôt de savoir s'offrir le temps du silence et de",
+      "start_ms": 107904,
+      "end_ms": 115504,
+      "duration_ms": 7600,
+      "first_word_latency_ms": 963.3,
+      "pipeline_latency_ms": 1025.5
+    }
+  ]
+}
