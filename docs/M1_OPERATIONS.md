@@ -84,6 +84,17 @@ logout validates RS256, issuer, audience, expiry, recent issuance, SID, subject 
 event type, revokes matching sessions and leaves a SID tombstone. A PostgreSQL transaction advisory lock on the stable identity
 serializes this against login so a late callback cannot resurrect a revoked SID.
 
+Account/session writes follow a shared lock order: stable-identity advisory lock
+when required, then account row, browser row when required, and session rows.
+Authentication discovers the session's account without a row lock, takes the
+account's `FOR NO KEY UPDATE` lock, then locks and revalidates the session before
+advancing idle time. Profile changes therefore cannot invert account/session locks
+against logout-all or callback issuance. Logout takes the account lock explicitly
+before touching browser/session authority. The weaker account lock remains compatible
+with foreign-key key-share checks; do not replace it with `FOR UPDATE` casually.
+Session rows are refreshed after account-lock waits, so a concurrent revocation
+returns 401. Transactions remain short and contain no provider network I/O.
+
 Initial limits: **30-minute idle**, **12-hour absolute**. Successful protected requests
 advance idle time; browser interactions send CSRF-protected activity at most every
 five minutes. Merely leaving a background tab open does not keep it alive. Activity

@@ -408,3 +408,174 @@ async def test_reinvitation_does_not_restore_organizer_authority(enterprise):
     assert (await c.get(detail)).status_code == 200
     assert (await c.get(detail + "/access")).status_code == 200
     assert (await c.put(detail + f"/access/{owner}", json={"allow": True})).status_code == 200
+
+
+async def test_logout_all_during_profile_update_has_no_lock_cycle(enterprise, engine, monkeypatch):
+    """AUTH-01: hold profile's authenticated transaction, then let logout-all wait.
+
+    Before the repair, logout holds Account while waiting for profile's session;
+    releasing profile makes it wait for Account and PostgreSQL reports 40P01.
+    Afterward, logout waits for Account before touching sessions, so both commit.
+    """
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+    from sqlalchemy.util.concurrency import await_only
+
+    from mosaique.identity import accounts
+
+    c = enterprise
+    actor, token = await login(c)
+    async with get_sessionmaker()() as db:
+        other_token = await db.run_sync(lambda s: Sessions(s).issue(actor))
+        await db.commit()
+    profile_ready, release_profile, logout_started = (
+        asyncio.Event(),
+        asyncio.Event(),
+        asyncio.Event(),
+    )
+    pids, errors = {}, []
+    original_profile, original_logout = accounts.update_profile, Sessions.logout
+
+    def paused_profile(db, *args, **kwargs):
+        pids["profile"] = db.scalar(text("SELECT pg_backend_pid()"))
+        profile_ready.set()
+        await_only(release_profile.wait())
+        try:
+            return original_profile(db, *args, **kwargs)
+        except DBAPIError as error:
+            errors.append(getattr(error.orig, "sqlstate", None))
+            raise
+
+    def observed_logout(self, *args, **kwargs):
+        pids["logout"] = self.db.scalar(text("SELECT pg_backend_pid()"))
+        logout_started.set()
+        try:
+            return original_logout(self, *args, **kwargs)
+        except DBAPIError as error:
+            errors.append(getattr(error.orig, "sqlstate", None))
+            raise
+
+    monkeypatch.setattr(accounts, "update_profile", paused_profile)
+    monkeypatch.setattr(Sessions, "logout", observed_logout)
+    profile = asyncio.create_task(c.patch("/saas/me", json={"display_name": "Concurrent"}))
+    logout = None
+    try:
+        await asyncio.wait_for(profile_ready.wait(), 5)
+        logout = asyncio.create_task(c.post("/saas/logout-all"))
+        await asyncio.wait_for(logout_started.wait(), 5)
+
+        await _wait_for_blocker(engine, pids["logout"], pids["profile"])
+        release_profile.set()
+        profile_response, logout_response = await asyncio.wait_for(
+            asyncio.gather(profile, logout), 10
+        )
+        assert (profile_response.status_code, logout_response.status_code, errors) == (200, 200, [])
+        async with get_sessionmaker()() as db:
+            assert (await db.get(Account, actor)).display_name == "Concurrent"
+            assert (await db.get(Account, actor)).login_generation > 0
+            rows = list(
+                await db.scalars(select(AccountSession).where(AccountSession.account_id == actor))
+            )
+            assert len(rows) == 2 and all(row.revoked_at is not None for row in rows)
+        for old_token in (token, other_token):
+            c.cookies.set("mosaique_session", old_token)
+            assert (await c.get("/saas/me")).status_code == 401
+    finally:
+        release_profile.set()
+        await asyncio.wait_for(
+            asyncio.gather(profile, *([logout] if logout else []), return_exceptions=True), 10
+        )
+
+
+async def _wait_for_blocker(engine, blocked, blocker):
+    import asyncio
+
+    from sqlalchemy import text
+
+    async def observe():
+        async with engine.connect() as observer:
+            while True:
+                blockers = await observer.scalar(
+                    text("SELECT pg_blocking_pids(:pid)"), {"pid": blocked}
+                )
+                if blocker in blockers:
+                    return
+                # Wait for observed DB state, never infer interleaving from a delay.
+                await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(observe(), 5)
+
+
+async def test_profile_rechecks_session_when_logout_all_wins(enterprise, engine, monkeypatch):
+    """A session read before waiting for Account must not survive revocation."""
+    import asyncio
+
+    from sqlalchemy import event, text
+    from sqlalchemy.util.concurrency import await_only
+
+    c = enterprise
+    actor, token = await login(c)
+    logout_ready, release_logout, profile_started = (
+        asyncio.Event(),
+        asyncio.Event(),
+        asyncio.Event(),
+    )
+    pids = {}
+    original_logout, original_authenticate = Sessions.logout, Sessions.authenticate
+
+    def observed_logout(self, *args, **kwargs):
+        connection = self.db.connection()
+        connection.info["test_logout_lock_order"] = True
+        pids["logout"] = self.db.scalar(text("SELECT pg_backend_pid()"))
+        try:
+            return original_logout(self, *args, **kwargs)
+        finally:
+            connection.info.pop("test_logout_lock_order", None)
+
+    def pause_after_account_lock(connection, cursor, statement, params, context, executemany):
+        if (
+            connection.info.get("test_logout_lock_order")
+            and "FROM accounts" in statement
+            and "FOR NO KEY UPDATE" in statement
+            and not logout_ready.is_set()
+        ):
+            logout_ready.set()
+            await_only(release_logout.wait())
+
+    def observed_authenticate(self, *args, **kwargs):
+        if kwargs.get("touch", True):
+            pids["profile"] = self.db.scalar(text("SELECT pg_backend_pid()"))
+            profile_started.set()
+        return original_authenticate(self, *args, **kwargs)
+
+    monkeypatch.setattr(Sessions, "logout", observed_logout)
+    monkeypatch.setattr(Sessions, "authenticate", observed_authenticate)
+    event.listen(engine.sync_engine, "after_cursor_execute", pause_after_account_lock)
+    logout = asyncio.create_task(c.post("/saas/logout-all"))
+    profile = None
+    try:
+        await asyncio.wait_for(logout_ready.wait(), 5)
+        profile = asyncio.create_task(c.patch("/saas/me", json={"display_name": "Too late"}))
+        await asyncio.wait_for(profile_started.wait(), 5)
+        await _wait_for_blocker(engine, pids["profile"], pids["logout"])
+        release_logout.set()
+        logout_response, profile_response = await asyncio.wait_for(
+            asyncio.gather(logout, profile), 10
+        )
+        assert logout_response.status_code == 200
+        assert profile_response.status_code == 401
+        async with get_sessionmaker()() as db:
+            assert (await db.get(Account, actor)).display_name == "Test Owner"
+            assert (await db.get(AccountSession, digest(token))).revoked_at is not None
+        c.cookies.set("mosaique_session", token)
+        assert (await c.get("/saas/me")).status_code == 401
+    finally:
+        release_logout.set()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(logout, *([profile] if profile else []), return_exceptions=True), 10
+            )
+        finally:
+            event.remove(engine.sync_engine, "after_cursor_execute", pause_after_account_lock)

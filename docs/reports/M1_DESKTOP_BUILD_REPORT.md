@@ -4,7 +4,7 @@
 - Original implementation commit: `1821d4fe9d4924b7f21340c55183bdb5d4aaf9a6`.
 - Starting checkout: `5fbe92b7c8fb241ab020f1196afa646d583991a3` (`codex/m1-saas`).
 - Approved M0/main: `51165577958dbedca74e14067bf9e1c6b31ff324`, unchanged.
-- Status: **Independent review returned CHANGES REQUIRED. Focused remediation is submitted for re-review; complete M1 acceptance remains unverified. Not approved for merge or pilot operation.**
+- Status: **Independent review confirmed the first three fixes, then found a profile/logout-all deadlock. Its focused repair is submitted for re-review; complete M1 acceptance remains unverified. Not approved for merge or pilot operation.**
 - Scope: AUTH-01..04, persistent meeting metadata/access scaffold, OPS-02 foundation.
   No M2 media, M3 intelligence, M4 integration or M5 release-readiness implementation.
 - Environment: macOS arm64, Python 3.12.9, uv 0.9.26, Node 23.7.0, PostgreSQL **14.19**.
@@ -184,7 +184,7 @@ required before merge.
 ## Independent-review remediation — 16 October 2026
 
 Review baseline: `b733e1567fb43bd2a6b47d2946cd8018d774d030`, clean working tree.
-The commit containing this report is the remediation review target. The original
+First remediation commit: `252be30c3fa77340b86ae225025c8645419cdb19`. The original
 implementation/evidence above remains historical; the findings and results in this
 section supersede its incomplete logout and organizer-revocation claims.
 Scope: AUTH-01, AUTH-03/04, OPS-02. No M2 or deployment behavior is implemented.
@@ -287,3 +287,109 @@ sequence/browser generation invariants and soft-revoked binding lifetime; inspec
 removal/rejoin/restoration authorization and audit; rehearse `0006` against reviewed
 historical data; verify retained offline dependency and CI command; distinguish local
 PG14/mock-provider evidence from the outstanding external gates.
+
+
+## Follow-up remediation — account/session lock inversion
+
+Starting review commit: `252be30c3fa77340b86ae225025c8645419cdb19`, clean checkout
+on `codex/m1-saas-desktop`. The independent Reviewer confirmed all three earlier
+findings resolved, then reproduced a new account/session deadlock. This section
+supersedes the prior self-review's claim that the full lock order was consistent.
+The commit containing this follow-up is the new review target. Scope: AUTH-01 and
+OPS-02; no schema/API changes, M2 work, frontend changes or ASR modifications.
+
+| Finding | Status / files | Proof and remaining limits |
+|---|---|---|
+| Logout-all deadlocks with profile updates; account-wide revocation can roll back | Fixed locally in `identity/sessions.py`; two HTTP/PostgreSQL regressions in `tests/integration/test_saas_foundation.py`; lock contract in `docs/M1_OPERATIONS.md` | Before repair, deterministic profile-first test observed profile **200**, logout-all **500**, SQLSTATE **40P01**. After repair both commit, account generation advances and both account sessions are revoked. In the reverse ordering, logout-all commits and waiting profile returns **401**, leaving the profile unchanged. Independent re-review required. |
+
+### Root cause and lock-path inspection
+
+Authentication previously acquired `AccountSession FOR UPDATE` and held it through
+the profile account update. Logout-all, after its identity/browser boundary work,
+could autoflush `Account.login_generation` before updating the held session. Each
+transaction then waited for the other's row. Callback account upsert followed by
+old-session revocation had the same account-before-session requirement, so merely
+reordering one logout flush would leave another inversion.
+
+Authentication now discovers the immutable session/account binding without locking
+that session, locks the account with PostgreSQL `FOR NO KEY UPDATE`, then locks and
+refreshes the session before validating revocation/expiry/CSRF and touching idle time.
+Logout explicitly acquires the same account lock before any browser/session mutation.
+This repairs the resource acquisition order, without retries, delays, new interfaces,
+services or transaction side-effect replay. `key_share=True` in SQLAlchemy's write-lock
+mode compiles to `FOR NO KEY UPDATE`; it does not mean `FOR KEY SHARE`.
+
+Inspected paths and ordering (plain MVCC reads do not acquire row write locks):
+
+| Path | Locks and interaction |
+|---|---|
+| Ordinary authenticated request / profile update | Account NO KEY UPDATE → session FOR UPDATE → handler's workspace locks if needed; profile updates its already-locked account. Same-account requests serialize until transaction commit. |
+| Local logout / logout-all | Authentication is read-only (`touch=False`); stable-identity advisory lock → account NO KEY UPDATE → browser if bound → session revocation. Generation writes cannot first acquire account while holding session. |
+| OIDC callback completion | Stable-identity advisory lock → account upsert → browser → old-session revocation/new-session insertion. No network work under these locks; durable generation/SID fencing unchanged. |
+| Login start / browser rebinding | Stable-identity advisory lock for prior account → sorted browser locks → prior-session binding write. No account-row mutation or later account write lock. Attempt consumption commits separately before callback provider exchange. |
+| Signed provider logout | Stable-identity advisory lock → SID tombstone → matching-session revocation. Account lookup is nonlocking; no later account write. |
+| Session issue/revoke helpers | Account lookup is nonlocking; issue called by callback already has its account lock. Revocation updates sessions, then insertion checks account FK with compatible KEY SHARE. Neither helper later modifies the account. |
+| Workspace/membership/audit operations | Protected request acquires actor account/session before workspace lock. Reads of other accounts are MVCC; account FK checks use KEY SHARE, compatible with the new NO KEY UPDATE lock. Using stronger FOR UPDATE here could introduce avoidable FK contention/inversions. |
+
+No new account/session inversion was found in these application paths. Operator
+maintenance and future identity writers must preserve the contract; this is not a
+claim that every possible PostgreSQL deadlock is impossible. Account write locks now
+serialize same-account protected requests across sessions; there is no load benchmark
+or new cache/worker system. No retry infrastructure is needed for the verified cycle.
+
+The regressions coordinate real HTTP transactions with asyncio events and PostgreSQL
+`pg_blocking_pids`, not assumed sleep durations. The profile-first test waits until
+logout is actually blocked before releasing profile. The reverse test pauses the
+actual account-lock SELECT and waits until profile blocks on it. Hooks are test-only,
+bounded waits and transaction cleanup run in `finally`, and the engine listener is
+removed. Both tests check durable data and reject revoked tokens afterward.
+
+### Executed follow-up verification
+
+Environment remains local macOS arm64/Python 3.12.9/PG **14.19** with synthetic data;
+PG16 is still unverified. Logs: `/tmp/mosaique-m1-lock-order/`.
+The first test connection attempt preceded rebinding our disposable cluster from its
+default port to isolated port 55432, so it failed with connection refused; the actual
+before/after results below are subsequent valid runs. No application workaround or
+new skip was used. Frontend/browser checks were not rerun for this backend-only
+repair; their prior evidence remains historical, not newly claimed verification.
+The existing opt-in MLX skip and marked slow deselection are unchanged.
+
+| Check | Actual result |
+|---|---|
+| New profile-first regression on unchanged application code | **FAIL as expected**, `(profile=200, logout-all=500, SQLSTATE=40P01)`, 1.89s |
+| Full `pytest tests/unit tests/integration tests/realtime -q -rs` after final implementation/test edits | **528 passed, 1 failed, 1 skipped, 1 deselected**, existing Authlib warning, 102.93s. Only failure: `test_a_silent_participant_does_not_claim_the_recognizer_stream`, independently established on baseline. No new regression or new skip/exclusion. |
+| Root `backend/.venv/bin/python -m unittest discover -s deploy/asr -p 'test_*.py' -v` | **5 passed**, 0.004s |
+| Diff/working-tree inspection and `git diff --check` | PASS; only session lock implementation, its regressions, operations lock contract and this report changed. No schema/ASR/frontend changes; main unchanged. |
+| Targeted `pytest tests/integration/test_saas_foundation.py tests/integration/test_oidc.py tests/integration/test_workspace_migration.py tests/unit/test_workspaces.py -q -rs` | **45 passed**, existing Authlib warning, 3.51s. Includes both new lock orderings, all previous OIDC exchange/issuance/generation fences and membership/organizer restoration/migration checks. |
+| `.venv/bin/ruff check .` / `.venv/bin/mypy` | PASS / PASS, **116 source files** |
+
+### Existing silent-participant ASR regression
+
+Root cause confirmed by inspecting `realtime/sessions/meeting.py`: `_open_participant`
+(line 309) calls `_open_stream` on join, before any audio frame. `_open_stream` adds
+`_sessions`, creates audio metadata/file state and starts `_pump` (line 379).
+`_pump` calls `recognizer.open_session` (line 613) before waiting on `next_frame`.
+Roster presence therefore consumes recognizer resources. With the existing
+single-stream MLX runtime, a silent host/observer can occupy the available stream
+and prevent the actual speaker from transcribing. The first test assertion can race
+the queued join event; its later assertion still exposes real premature allocation.
+
+A **separate focused prototype lifecycle fix is warranted**: separate roster presence
+from allocation until first audio, preserve per-capture reconnect/sequence anchors,
+idle-close/reopen behavior, and ensure silent disconnect/end tears down cleanly.
+The existing first-frame reopening path at `_on_frame` is relevant, but changing join
+also needs explicit roster/reconnect/cleanup coverage. It is not an account/session
+security fix. No ASR source or tests are changed here and no failure is suppressed.
+
+### Review and external gates
+
+Re-review the explicit account-before-session locks, compatible lock strength,
+post-wait session refresh, profile/logout ordering tests, callback fences and the
+path audit above. No migration is introduced. The earlier three findings remain
+resolved per the independent Reviewer; this follow-up awaits independent approval.
+M1 is **not declared complete**. Live Auth0 registration/recovery/event delivery,
+approved provider provisioning/region/cost, hosted CI/Linux/PG16 and sanitized
+operational migration/backup/rollback/old-process-drain verification remain gates.
+The pre-existing ASR failure and dependency advisories remain documented blockers.
+No push, merge, deployment or external writes occurred.

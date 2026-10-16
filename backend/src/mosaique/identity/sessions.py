@@ -93,19 +93,34 @@ class Sessions:
         if not token or len(token) > 128:
             raise InvalidToken()
         statement = select(AccountSession).where(AccountSession.token_hash == digest(token))
-        if touch:
-            statement = statement.with_for_update()
         row = self.db.scalar(statement.execution_options(populate_existing=True))
+        if row is None:
+            raise InvalidToken()
+        # First discover the immutable account binding without a session lock.
+        # Account -> browser (if needed) -> session is the write-lock order shared
+        # with callback issuance and logout. NO KEY UPDATE permits FK key-share
+        # checks; FOR UPDATE would needlessly block membership/audit inserts.
+        account = self.db.get(
+            Account,
+            row.account_id,
+            populate_existing=True,
+            with_for_update={"key_share": True} if touch else None,
+        )
+        if account is None or account.disabled:
+            raise InvalidToken()
+        if touch:
+            # Logout may have revoked it while the account lock was unavailable.
+            row = self.db.scalar(
+                statement.with_for_update().execution_options(populate_existing=True)
+            )
         now = datetime.now(UTC)
         if (
             row is None
+            or row.account_id != account.id
             or row.revoked_at is not None
             or utc(row.expires_at) <= now
             or utc(row.last_seen_at) <= now - timedelta(minutes=30)
         ):
-            raise InvalidToken()
-        account = self.db.get(Account, row.account_id, populate_existing=True)
-        if account is None or account.disabled:
             raise InvalidToken()
         if mutate and (not csrf or not secrets.compare_digest(row.csrf_token, csrf)):
             raise Forbidden("Refresh the page and retry (CSRF validation failed)")
@@ -225,7 +240,11 @@ class Sessions:
         account = self.db.get(Account, account_id, populate_existing=True)
         assert account is not None
         lock_identity(self.db, account.issuer, account.subject)
-        account = self.db.get(Account, account_id, populate_existing=True)
+        # Take the account lock explicitly before browser/session revocation;
+        # relying on a later autoflush reverses profile authentication's order.
+        account = self.db.get(
+            Account, account_id, populate_existing=True, with_for_update={"key_share": True}
+        )
         assert account is not None
         row = self.db.get(AccountSession, digest(token), populate_existing=True)
         if row is None or row.account_id != account_id:
