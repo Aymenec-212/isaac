@@ -363,3 +363,48 @@ async def test_grant_target_does_not_reveal_foreign_accounts(enterprise):
     ]
     assert [r.status_code for r in responses] == [404, 404]
     assert responses[0].json()["error"]["message"] == responses[1].json()["error"]["message"]
+
+
+async def test_reinvitation_does_not_restore_organizer_authority(enterprise):
+    c = enterprise
+    owner, owner_token = await login(c)
+    org = await workspace(c)
+    invitation = await invite(c, org, "organizer@test")
+    organizer, organizer_token = await login(c, "organizer@test")
+    assert (await c.post("/saas/invitations/accept", json={"token": invitation})).status_code == 200
+    root = f"/saas/workspaces/{org}/meetings"
+    meeting = (await c.post(root, json={"title": "Revoked organizer"})).json()["id"]
+    detail = f"{root}/{meeting}"
+    assert (await c.get(detail)).status_code == 200
+    assert (await c.get(detail + "/access")).status_code == 200
+
+    async def switch(token):
+        c.cookies.set("mosaique_session", token)
+        c.headers["X-CSRF-Token"] = (await c.get("/saas/me")).json()["csrf_token"]
+
+    await switch(owner_token)
+    assert (await c.get(detail)).status_code == 404  # Owner is not an implicit viewer.
+    assert (
+        await c.patch(f"/saas/workspaces/{org}/members/{organizer}", json={"role": None})
+    ).status_code == 200
+    assert (await c.post(detail + "/restore-organizer")).status_code == 404
+    invitation = await invite(c, org, "organizer@test")
+    await switch(organizer_token)
+    assert (await c.get(root)).status_code == 404
+    assert (await c.post("/saas/invitations/accept", json={"token": invitation})).status_code == 200
+    assert (await c.get(root)).json() == []
+    assert (await c.get(detail)).status_code == 404
+    assert (await c.get(detail + "/access")).status_code == 404
+    assert (await c.put(detail + f"/access/{owner}", json={"allow": True})).status_code == 404
+    assert (await c.post(detail + "/restore-organizer")).status_code == 403
+    await switch(owner_token)
+    assert (await c.post(detail + "/restore-organizer")).status_code == 200
+    events = (await c.get(f"/saas/workspaces/{org}/audit")).json()
+    restored = [e for e in events if e["action"] == "meeting.organizer_restored"]
+    assert len(restored) == 1
+    assert restored[0]["target_id"] == organizer and restored[0]["context_id"] == meeting
+    await switch(organizer_token)
+    assert [m["id"] for m in (await c.get(root)).json()] == [meeting]
+    assert (await c.get(detail)).status_code == 200
+    assert (await c.get(detail + "/access")).status_code == 200
+    assert (await c.put(detail + f"/access/{owner}", json={"allow": True})).status_code == 200

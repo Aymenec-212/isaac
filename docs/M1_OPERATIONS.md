@@ -73,11 +73,15 @@ logs likewise. Auth0 receives account data, not meetings/transcripts.
 
 Host-only HttpOnly/SameSite=Lax cookies are Secure on HTTPS. HTTP is supported for
 local development only; pilot validation requires HTTPS. Login rotates the browser's
-old application session. Logout deletes that session; logout-all deletes all local
-sessions. Subsequent login requests force provider reauthentication. Account disable
+old application session. Logout revokes that browser's sessions and increments its
+durable login generation; logout-all also advances an account-wide generation and
+revokes every account session. Pending callbacks, even from another anonymous
+browser for logout-all, cannot cross these boundaries. Generation checks and session
+issuance share PostgreSQL transaction locks. Revoked session rows retain the browser
+binding, so rotation cannot hide an in-flight callback from logout. Subsequent login requests force provider reauthentication. Account disable
 and membership changes are checked on every protected request. Signed back-channel
 logout validates RS256, issuer, audience, expiry, recent issuance, SID, subject and
-event type, removes matching sessions and leaves a SID tombstone. A PostgreSQL transaction advisory lock on the stable identity
+event type, revokes matching sessions and leaves a SID tombstone. A PostgreSQL transaction advisory lock on the stable identity
 serializes this against login so a late callback cannot resurrect a revoked SID.
 
 Initial limits: **30-minute idle**, **12-hour absolute**. Successful protected requests
@@ -98,9 +102,13 @@ Owners assign/revoke roles; owner/admin rename, invite and revoke outstanding
 invitations. All members may prepare private meetings. Only the organizer grants
 meeting access to current members; workspace ownership does not imply private-meeting
 access. Revocation removes the member's grants; re-invitation does not restore them.
-Revoking an organizer leaves its private meeting inaccessible to them; no hidden
-administrator takeover is provided. Explicit audited administration/ownership
-transfer needs a reviewed policy before enabling that operation.
+Revocation also stamps the organizer's meeting authority independently of membership.
+Re-invitation restores membership only. A workspace owner may explicitly restore
+that original organizer through
+`POST /saas/workspaces/{org}/meetings/{meeting_id}/restore-organizer`; the original
+organizer must be an active enabled member, and `meeting.organizer_restored` records
+actor, target and meeting. This does not transfer ownership or grant the owner
+private-meeting visibility. There is no implicit restoration on rejoin.
 
 Invitations are member-only, verified-address-bound, seven-day and single-use.
 Only hashes are stored. Links use fragments to avoid access-log/referrer leakage;
@@ -108,7 +116,11 @@ sharing is manual, with no email-provider write. Lists return at most 100 recent
 meetings/invitations/audit entries; pagination is not implemented in this increment.
 Workspace audit records actor/action/target/context, never invitation secrets or
 profile content. Retention/deletion and audit export remain M5 work. Expired session
-and attempt rows require routine maintenance; SID revocation markers are retained pending a reviewed deletion policy. Backups contain credential hashes and must be access controlled.
+and attempt rows require routine maintenance. Do not delete session/browser
+cancellation state while associated sessions or ten-minute callbacks can still be
+valid. Browser generations and SID revocation markers are retained pending a reviewed
+cleanup policy; no automatic deletion job is introduced here. Backups contain
+credential hashes and must be access controlled.
 
 ## Verification
 
@@ -116,6 +128,7 @@ and attempt rows require routine maintenance; SID revocation markers are retaine
 # backend/ (both application and test DSNs must name disposable databases)
 uv run --no-sync ruff check .
 uv run --no-sync mypy
+uv run --no-sync python -m unittest discover -s ../deploy/asr -p 'test_*.py' -v
 uv run --no-sync pytest tests/unit tests/integration tests/realtime -q -rs
 # frontend/
 npm run lint
@@ -137,3 +150,23 @@ snapshot rehearsal, migration lock timing, or PostgreSQL 16 CI execution.
 Migration rollback must retain the additive tables/columns and mode-aware access
 checks. Do not serve old unfiltered prototype code over enterprise records as an
 operational rollback. No real migration, downgrade or rollback was authorized or run.
+
+
+## Remediation migration 0006
+
+Apply through Alembic after a separately approved backup/rehearsal. The additive
+revision creates a database login-order sequence, browser cancellation rows, account
+revocation generation, session browser binding/revocation timestamp, attempt
+generations and meeting organizer-revocation timestamp. Existing sessions remain
+valid until normal expiry/revocation; existing pending logins are deliberately
+cancelled and must restart. Existing membership revocation timestamps and
+`membership.revoked` audit history fence organizer authority, including members
+already re-invited before this migration. Meetings created after a prior revocation
+are unaffected by that audit backfill. Do not clear the audit ledger before rehearsal.
+
+Drain old application processes and in-flight callbacks before switching revisions;
+old binaries do not enforce these new boundaries. Do not run mixed old/new identity
+writers. No operational migration, mixed-version rollout or rollback is verified by
+the local synthetic rehearsal. Downgrade refuses to erase authorization boundaries.
+The retained Azure validator is an offline security-test dependency, not an approved
+Azure deployment stack; see [its scope](../infra/azure/README.md).

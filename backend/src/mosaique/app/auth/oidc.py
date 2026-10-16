@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import secrets
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -16,14 +16,14 @@ import jwt
 from authlib.integrations.starlette_client import OAuth
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import select, update
 
 from mosaique.app.api.dependencies import SettingsDep
 from mosaique.app.api.saas import COOKIE
 from mosaique.config.settings import Settings
 from mosaique.domain.errors import ErrorCode, InvalidToken, MosaiqueError
-from mosaique.identity.accounts import identity_key, lock_identity, resolve_account
-from mosaique.identity.sessions import Sessions, digest, utc
+from mosaique.identity.accounts import identity_key, lock_identity
+from mosaique.identity.sessions import LoginTicket, Sessions, digest, utc
 from mosaique.persistence.engine import session_scope
 from mosaique.persistence.models.identity import (
     Account,
@@ -74,8 +74,17 @@ async def login(request: Request, settings: SettingsDep) -> RedirectResponse:
     provider = request.app.state.oidc_provider
     if provider is None:
         raise MosaiqueError(ErrorCode.IDENTITY_UNAVAILABLE, "Sign-in is not configured")
-    state, browser = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+    state = secrets.token_urlsafe(32)
+    browser = request.cookies.get(BROWSER_COOKIE)
+    if not browser or len(browser) > 128:
+        browser = secrets.token_urlsafe(32)
     nonce, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(64)
+    async with session_scope() as db:
+        await db.run_sync(
+            lambda s: Sessions(s).begin_login(
+                browser, state, nonce, verifier, request.cookies.get(COOKIE)
+            )
+        )
     try:
         await metadata(provider, settings)
         result = await provider.create_authorization_url(
@@ -91,25 +100,6 @@ async def login(request: Request, settings: SettingsDep) -> RedirectResponse:
         raise MosaiqueError(
             ErrorCode.IDENTITY_UNAVAILABLE, "Sign-in provider is unavailable. Retry shortly."
         ) from None
-    async with session_scope() as db:
-        now = datetime.now(UTC)
-        expired = select(LoginAttempt.state_hash).where(LoginAttempt.expires_at <= now).limit(100)
-        await db.execute(delete(LoginAttempt).where(LoginAttempt.state_hash.in_(expired)))
-        old = request.cookies.get(BROWSER_COOKIE)
-        if old:
-            await db.execute(delete(LoginAttempt).where(LoginAttempt.browser_hash == digest(old)))
-        count = await db.scalar(select(func.count()).select_from(LoginAttempt))
-        if count is not None and count >= 1000:
-            raise MosaiqueError(ErrorCode.RATE_LIMITED, "Too many sign-in attempts. Retry shortly.")
-        db.add(
-            LoginAttempt(
-                state_hash=digest(state),
-                browser_hash=digest(browser),
-                nonce=nonce,
-                verifier=verifier,
-                expires_at=now + timedelta(minutes=10),
-            )
-        )
     response = RedirectResponse(result["url"], status_code=302)
     response.set_cookie(
         BROWSER_COOKIE,
@@ -143,6 +133,12 @@ async def callback(request: Request, settings: SettingsDep) -> RedirectResponse:
         ):
             raise InvalidToken("Sign-in expired or cancelled. Start again.")
         nonce, verifier = attempt.nonce, attempt.verifier
+        ticket = LoginTicket(
+            attempt.browser_hash,
+            attempt.browser_generation,
+            attempt.login_generation,
+            attempt.expires_at,
+        )
         await db.delete(attempt)
     # State is single-use even if the provider fails. A retry starts a new flow.
     provider = request.app.state.oidc_provider
@@ -175,23 +171,19 @@ async def callback(request: Request, settings: SettingsDep) -> RedirectResponse:
     except Exception:
         raise InvalidToken("Sign-in could not be verified. Start again.") from None
     async with session_scope() as db:
-        account_id = await db.run_sync(
-            lambda s: resolve_account(
-                s,
+        session_token = await db.run_sync(
+            lambda s: Sessions(s).complete_login(
+                ticket,
                 issuer=str(settings.oidc_issuer),
                 subject=claims["sub"],
                 email=claims["email"],
                 email_verified=claims["email_verified"],
                 initial_name=str(claims.get("name") or ""),
-            )
-        )
-        session_token = await db.run_sync(
-            lambda s: Sessions(s).issue(
-                account_id, previous=request.cookies.get(COOKIE), provider_sid=claims["sid"]
+                provider_sid=claims["sid"],
+                previous=request.cookies.get(COOKIE),
             )
         )
     response = RedirectResponse(settings.public_origin + "/", status_code=303)
-    response.delete_cookie(BROWSER_COOKIE, path="/")
     response.set_cookie(
         COOKIE,
         session_token,
@@ -264,9 +256,11 @@ async def backchannel_logout(request: Request, settings: SettingsDep) -> Respons
         )
         if account is not None:
             await db.execute(
-                delete(AccountSession).where(
+                update(AccountSession)
+                .where(
                     AccountSession.account_id == account.id,
                     AccountSession.provider_sid_hash == key[1],
                 )
+                .values(revoked_at=datetime.now(UTC))
             )
     return Response(status_code=200, headers={"Cache-Control": "no-store"})

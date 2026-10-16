@@ -1,10 +1,10 @@
 # M1 Desktop build report — enterprise SaaS foundation
 
 - Date: 16 October 2026. Branch: `codex/m1-saas-desktop`.
-- Implementation commit: `1821d4fe9d4924b7f21340c55183bdb5d4aaf9a6`.
+- Original implementation commit: `1821d4fe9d4924b7f21340c55183bdb5d4aaf9a6`.
 - Starting checkout: `5fbe92b7c8fb241ab020f1196afa646d583991a3` (`codex/m1-saas`).
 - Approved M0/main: `51165577958dbedca74e14067bf9e1c6b31ff324`, unchanged.
-- Status: **Local implementation ready for independent review; complete M1 acceptance remains unverified. Not approved for merge or pilot operation.**
+- Status: **Independent review returned CHANGES REQUIRED. Focused remediation is submitted for re-review; complete M1 acceptance remains unverified. Not approved for merge or pilot operation.**
 - Scope: AUTH-01..04, persistent meeting metadata/access scaffold, OPS-02 foundation.
   No M2 media, M3 intelligence, M4 integration or M5 release-readiness implementation.
 - Environment: macOS arm64, Python 3.12.9, uv 0.9.26, Node 23.7.0, PostgreSQL **14.19**.
@@ -49,7 +49,7 @@ the complete milestone history separately against approved M0/main.
   change fixes eight mypy re-export diagnostics without changing model behavior.
   `ReviewPage` receives a stable memo dependency to satisfy the restored lint gate.
 
-The exact 58-file implementation manifest is in [M1_DESKTOP_FILES.txt](M1_DESKTOP_FILES.txt).
+The original 58-file implementation manifest is in [M1_DESKTOP_FILES.txt](M1_DESKTOP_FILES.txt).
 Generated API contracts and package locks account for much of the diff.
 
 ## Architectural decisions
@@ -73,7 +73,8 @@ account row or before an in-flight callback commits. No network call holds a DB 
 
 Workspace row locks serialize role changes, invitation redemption and meeting grants.
 Composite tenant/parent constraints reinforce scoped application checks. Revocation
-removes grants so re-invitation cannot revive private-meeting access. Domain owners
+removes explicit grants. The first review identified that implicit organizer authority
+was still revived by re-invitation; the remediation below corrects that defect. Domain owners
 have no HTTP/provider SDK imports; import fitness tests cover these boundaries.
 
 Existing meeting rows remain canonical. `mode` plus identity constraints distinguish
@@ -151,12 +152,13 @@ because hosted CI has not executed and the baseline regression remains red.
 4. LiveKit tokens/WS/media revocation and active-call expiry/rejoin are M2 gates.
    M1 has no call: the authenticated activity operation is tested, but M2 must drive
    it from actual participation so long speaking/listening does not look idle.
-5. Private-meeting organizer transfer/admin access is not implemented; revoked
-   organizers cannot regain access without an explicit later policy. Lists expose
+5. Organizer transfer and implicit administrative private access remain absent.
+   The approved remediation policy adds explicit, audited owner restoration of the
+   original organizer; re-invitation alone restores no meeting authority. Lists expose
    the latest 100 records; pagination/export, retention/deletion, operational cleanup
    and broader security hardening remain limitations, detailed in the operations guide.
 6. Baseline prototype ASR failure, dependency advisories and absent live acceptance
-   preclude a green release/readiness claim. No independent review has occurred.
+   preclude a green release/readiness claim. Independent review returned the three findings addressed below; re-review and human approval remain required.
 
 No external account, paid resource, provider credential, real customer recording,
 production migration, ticket write, push, merge or deployment was performed. The
@@ -173,6 +175,115 @@ and legacy preservation; commit-before-response failure handling; UI stale respo
 and no credential storage. Reproduce real PostgreSQL tests, inspect CI rather than
 assuming it ran, and keep provider mocks distinct from live Auth0 evidence.
 
-Builder self-inspection fixed first-login/logout fencing, target-ID existence
-leakage, grant revival on re-invite and commit acknowledgement timing. This is not
-independent review. Human approval remains required before merge.
+The original self-inspection did not catch local logout/callback races or implicit
+organizer revival. Its provider-SID fencing and explicit-grant tests were insufficient
+for those cases. See the focused remediation evidence below. Human approval remains
+required before merge.
+
+
+## Independent-review remediation — 16 October 2026
+
+Review baseline: `b733e1567fb43bd2a6b47d2946cd8018d774d030`, clean working tree.
+The commit containing this report is the remediation review target. The original
+implementation/evidence above remains historical; the findings and results in this
+section supersede its incomplete logout and organizer-revocation claims.
+Scope: AUTH-01, AUTH-03/04, OPS-02. No M2 or deployment behavior is implemented.
+
+| Verified finding | Status and affected files | Regression evidence / limitations |
+|---|---|---|
+| P1 local logout / logout-all versus OIDC callback | Fixed locally: `identity/sessions.py`, `app/auth/oidc.py`, `app/api/saas.py`, identity models, revision `0006` | Before changes, both exchange-paused endpoint tests failed (late callback 303 after logout 200). Final deterministic event-driven tests cover both endpoints during exchange, immediately before atomic validation, and immediately before session insertion while locks are held. They also cover another anonymous browser on logout-all and a legitimate new login while an old cancelled exchange remains in flight. No sleeps or process-local production locks. Live Auth0 remains unverified. |
+| P2 missing offline deployment validator | Fixed: restored `infra/azure/check-parameters.py` byte-for-byte from approved main `5116557`; scope documented in adjacent README; `.github/workflows/verify.yml` now runs retained offline tests | Before restoration, unittest import failed with FileNotFoundError. After restoration all 5 cases pass. Original validator uses stdlib and ARM parameter JSON only; deleted VM templates/Bicep examples are not dependencies and remain retired. No Azure call/deployment. |
+| P2 organizer authority revives after removal/re-invitation | Fixed locally: `workspaces/service.py`, `meetings/service.py`, meeting model, revision `0006`, SaaS restoration route and generated enterprise API contract | HTTP regression covers removal, re-invitation, list/detail denial, access-list and grant-management denial, forbidden self-restoration, explicit owner restoration and audit. Existing explicit-grant regression still passes. No owner private-visibility bypass or ownership transfer. |
+
+### Boundary decisions and self-review
+
+`Sessions` owns login start/completion/cancellation. A durable browser row records
+its generation; login attempts capture that generation and a database sequence
+value. Logout increments the browser generation and revokes all its sessions.
+Logout-all additionally advances the account's sequence floor and revokes all
+account sessions. This also cancels older anonymous attempts in other browsers
+whose stable provider identity was not yet known when they began. New attempts
+receive a later sequence value and remain legitimate.
+
+Completion locks the stable issuer/subject, then the browser row, and checks both
+generations, account state, provider SID tombstone and deadline before issuing a
+session in the same transaction. Logout uses the same lock order. If completion
+wins, logout waits and revokes its issued session before acknowledging success.
+Logout authentication validates CSRF/expiry without first taking a session-row
+write lock, avoiding reversed lock order. Rotation and provider logout retain
+revoked session rows so the browser binding survives issuance races; authentication
+rejects those rows. No database transaction spans provider network I/O.
+
+Membership removal stamps `Meeting.organizer_revoked_at` and removes explicit
+access grants under the existing workspace lock. List/detail/management share the
+organizer authority predicate. Rejoining clears membership revocation only.
+`restore-organizer` requires an enabled owner and an enabled active membership for
+the original organizer, and writes an audit event. It neither transfers ownership
+nor makes private records visible to owners implicitly. This small explicit action
+implements the user's restoration policy without a new role/permission framework.
+
+Revision `0006` is additive, preserves existing sessions and legacy content, cancels
+pre-upgrade pending attempts, and backfills organizer revocations from both current
+membership revocation and prior `membership.revoked` audit history (including an
+already-reinvited member). A synthetic real-migration test verifies these cases and
+an empty model/schema diff. Existing revisions are unchanged. Mixed-version writers,
+operational lock timing and rollback remain separate gates; drain old processes.
+Cancellation state cleanup is deliberately not improvised: retain browser/session
+bindings while any associated session or callback could be valid; review retention
+before operating at scale. See [operations](../M1_OPERATIONS.md).
+
+Self-review inspected the complete remediation diff for domain/HTTP boundaries,
+lock ordering, grant-rule duplication, legacy preservation and unrelated ASR changes.
+There is one identity cancellation owner and one organizer authority predicate;
+no provider domain, generic authorization framework or media behavior was added.
+
+### Remediation verification
+
+All PostgreSQL evidence uses the disposable local PG **14.19** instance on port
+55432, Python 3.12.9 and synthetic data. Local logs:
+`/tmp/mosaique-m1-remediation/`. These are local checks, not hosted CI evidence.
+Backend/database-mutating browser checks run sequentially.
+
+| Command / check | Actual result |
+|---|---|
+| `pytest tests/integration/test_workspace_migration.py tests/integration/test_oidc.py tests/integration/test_saas_foundation.py tests/unit/test_workspaces.py -q -rs` | **43 passed**, one existing Authlib deprecation warning, 3.54s |
+| `pytest tests/unit tests/integration tests/realtime -q -rs` | **524 passed, 1 failed, 1 skipped, 1 deselected**, one warning, 102.55s. Only failure is the independently established silent-participant baseline. This sweep predates the final two additional new-login/old-exchange tests; the final targeted run includes both. |
+| `.venv/bin/ruff check .` / `.venv/bin/mypy` | PASS / PASS, **116 source files** |
+| Root `backend/.venv/bin/python -m unittest discover -s deploy/asr -p 'test_*.py' -v` | **5 passed** (0.006s); now explicitly included in backend CI job |
+| `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` | PASS; **15 files / 115 unit tests**; contrast checker retains the same 3 documented gaps |
+| Enterprise OpenAPI export and `npm run generate:saas-api` | PASS; regenerated 24-path contract adds only explicit organizer restoration. Fresh exports of both enterprise and 13-path prototype contracts match tracked files. |
+| Fresh disposable UTF-8 DB: `.venv/bin/alembic upgrade head` / `.venv/bin/alembic check` | PASS, actual 0001→0006 chain / no new upgrade operations detected |
+| `npm run test:e2e:saas` | **1 passed**, complete seeded two-account journey, 7.8s |
+| `npm run test:e2e:prototype` | **28 passed**, all existing browser journeys, 2.2m |
+| Final working-tree/diff inspection, `git diff --check`, retained validator comparison with approved main | PASS; only intended remediation files; no ASR changes; `main` unchanged |
+
+### Baseline failure investigation and remaining gates
+
+The unchanged prototype `_open_participant` in `realtime/sessions/meeting.py`
+starts `_open_stream` on join. That creates audio metadata/file state and launches
+`_pump`, which opens the recognizer before the first frame. This explains the
+silent-participant assertion. Deferring that lifecycle requires coordinated
+reconnect/capture/idle-close and resource-cleanup verification; removing a line merely
+to turn this focused M1 report green is not a safe authorization fix. No ASR source
+or tests were changed, suppressed or excluded. The existing opt-in MLX skip and slow
+deselection remain; no new skips. The initial restricted sandbox PostgreSQL attempt
+failed on socket permission and was rerun with authorized local access; it is not
+an application regression. A separate migration bootstrap initially used the
+cluster's SQL-ASCII maintenance database, causing driver string decoding to fail;
+creating an explicitly UTF-8 disposable database resolved it without application
+changes. The real upgrade/check then passed.
+
+The three reported findings are fixed in local tests and submitted for independent
+re-review, **not** a declaration that M1 is complete. Live Auth0 hosted registration,
+recovery/back-channel delivery and plan/residency authorization remain unverified.
+Hosted CI/Linux/PG16, sanitized operational migration/backup/rollback rehearsal,
+old-process draining and migration timing remain unverified. Existing dependency
+advisories and baseline ASR failure remain. M2 media revocation/active-call expiry
+remain future milestone gates. No external account, cost, live credentials, push,
+merge or deployment occurred.
+
+Reviewer focus: reproduce callback race tests in both lock orderings, inspect the
+sequence/browser generation invariants and soft-revoked binding lifetime; inspect
+removal/rejoin/restoration authorization and audit; rehearse `0006` against reviewed
+historical data; verify retained offline dependency and CI command; distinguish local
+PG14/mock-provider evidence from the outstanding external gates.

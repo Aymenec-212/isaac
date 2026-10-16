@@ -15,12 +15,12 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from mosaique.domain.errors import ErrorCode, Forbidden, InvalidToken, MosaiqueError, NotFound
 from mosaique.domain.ids import new_id
-from mosaique.persistence.models import Organization
+from mosaique.persistence.models import Meeting, Organization
 from mosaique.persistence.models.identity import Account, Invitation, MeetingAccess, Membership
 from mosaique.workspaces.audit import record
 
@@ -202,6 +202,16 @@ class Workspaces:
                 raise Forbidden("Cannot remove the last owner")
         if role is None:
             target.revoked_at = datetime.now(UTC)
+            self.db.execute(
+                update(Meeting)
+                .where(
+                    Meeting.organization_id == organization_id,
+                    Meeting.mode == "enterprise",
+                    Meeting.organizer_account_id == target_id,
+                    Meeting.organizer_revoked_at.is_(None),
+                )
+                .values(organizer_revoked_at=target.revoked_at)
+            )
             self.db.execute(
                 delete(MeetingAccess).where(
                     MeetingAccess.organization_id == organization_id,

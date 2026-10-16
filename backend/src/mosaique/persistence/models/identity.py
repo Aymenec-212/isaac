@@ -3,17 +3,29 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Sequence,
     String,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from mosaique.persistence.models.base import Base, created_at_col, ulid_pk
+
+LOGIN_GENERATION = Sequence("identity_login_generation", metadata=Base.metadata)
+
+
+class BrowserLogin(Base):
+    __tablename__ = "browser_logins"
+    browser_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    generation: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
 
 
 class Account(Base):
@@ -28,6 +40,9 @@ class Account(Base):
         String(120), nullable=False, default="", server_default=""
     )
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    login_generation: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
     disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = created_at_col()
 
@@ -95,6 +110,10 @@ class AccountSession(Base):
     account_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    browser_hash: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("browser_logins.browser_hash"), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     provider_sid_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     csrf_token: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = created_at_col()
@@ -108,6 +127,12 @@ class LoginAttempt(Base):
     __tablename__ = "login_attempts"
     state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     browser_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    browser_generation: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    login_generation: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
     nonce: Mapped[str] = mapped_column(String(64), nullable=False)
     verifier: Mapped[str] = mapped_column(String(128), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

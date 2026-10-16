@@ -2,8 +2,9 @@
 
 import builtins
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from mosaique.domain.errors import ErrorCode, Forbidden, MosaiqueError, NotFound
 from mosaique.domain.ids import new_id
@@ -29,27 +30,43 @@ class Meetings:
                 .where(
                     Meeting.organization_id == org,
                     Meeting.mode == "enterprise",
-                    or_(Meeting.organizer_account_id == actor, Meeting.id.in_(access)),
+                    or_(self._organizer(actor), Meeting.id.in_(access)),
                 )
                 .order_by(Meeting.created_at.desc(), Meeting.id.desc())
                 .limit(100)
             )
         )
 
+    @staticmethod
+    def _organizer(actor: str) -> ColumnElement[bool]:
+        return and_(Meeting.organizer_account_id == actor, Meeting.organizer_revoked_at.is_(None))
+
     def get(self, actor: str, org: str, meeting_id: str) -> Meeting:
         self.workspaces.authorize(actor, org)
+        access = select(MeetingAccess.meeting_id).where(
+            MeetingAccess.organization_id == org, MeetingAccess.account_id == actor
+        )
         meeting = self.db.scalar(
             select(Meeting).where(
                 Meeting.organization_id == org,
                 Meeting.id == meeting_id,
                 Meeting.mode == "enterprise",
+                or_(self._organizer(actor), Meeting.id.in_(access)),
             )
         )
-        if meeting is None or (
-            meeting.organizer_account_id != actor
-            and self.db.get(MeetingAccess, (org, meeting_id, actor), populate_existing=True) is None
-        ):
+        if meeting is None:
             raise NotFound()
+        return meeting
+
+    def _managed(self, actor: str, org: str, meeting_id: str) -> Meeting:
+        meeting = self.get(actor, org, meeting_id)
+        if (
+            self.db.scalar(
+                select(Meeting.id).where(Meeting.id == meeting.id, self._organizer(actor))
+            )
+            is None
+        ):
+            raise Forbidden("Meeting organizer required")
         return meeting
 
     def create(self, actor: str, org: str, title: str) -> Meeting:
@@ -73,9 +90,7 @@ class Meetings:
 
     def grant(self, actor: str, org: str, meeting_id: str, target: str, *, allow: bool) -> None:
         self.workspaces.lock(org)
-        meeting = self.get(actor, org, meeting_id)
-        if meeting.organizer_account_id != actor:
-            raise Forbidden("Meeting organizer required")
+        self._managed(actor, org, meeting_id)
         target_member = self.db.scalar(
             select(Membership)
             .join(Account, Account.id == Membership.account_id)
@@ -107,9 +122,7 @@ class Meetings:
         self.db.flush()
 
     def access(self, actor: str, org: str, meeting_id: str) -> builtins.list[str]:
-        meeting = self.get(actor, org, meeting_id)
-        if meeting.organizer_account_id != actor:
-            raise Forbidden("Meeting organizer required")
+        self._managed(actor, org, meeting_id)
         return list(
             self.db.scalars(
                 select(MeetingAccess.account_id).where(
@@ -117,3 +130,42 @@ class Meetings:
                 )
             )
         )
+
+    def restore_organizer(self, actor: str, org: str, meeting_id: str) -> None:
+        """Explicit owner-authorized restoration; rejoining alone never restores authority."""
+        self.workspaces.lock(org)
+        member = self.workspaces.authorize(actor, org)
+        if member.role != "owner":
+            raise Forbidden("Workspace owner required")
+        meeting = self.db.scalar(
+            select(Meeting).where(
+                Meeting.organization_id == org,
+                Meeting.id == meeting_id,
+                Meeting.mode == "enterprise",
+            )
+        )
+        if meeting is None:
+            raise NotFound()
+        target = self.db.scalar(
+            select(Membership)
+            .join(Account)
+            .where(
+                Membership.organization_id == org,
+                Membership.account_id == meeting.organizer_account_id,
+                Membership.revoked_at.is_(None),
+                Account.disabled.is_(False),
+            )
+        )
+        if target is None:
+            raise NotFound("Workspace member unavailable")
+        if meeting.organizer_revoked_at is not None:
+            meeting.organizer_revoked_at = None
+            record(
+                self.db,
+                org,
+                actor,
+                "meeting.organizer_restored",
+                target.account_id,
+                context_id=meeting.id,
+            )
+        self.db.flush()

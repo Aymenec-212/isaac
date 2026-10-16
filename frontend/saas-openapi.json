@@ -959,6 +959,61 @@
         }
       }
     },
+    "/saas/workspaces/{org}/meetings/{meeting_id}/restore-organizer": {
+      "post": {
+        "tags": [
+          "enterprise"
+        ],
+        "summary": "Restore Organizer",
+        "operationId": "restore_organizer_saas_workspaces__org__meetings__meeting_id__restore_organizer_post",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Org"
+            }
+          },
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Restore Organizer Saas Workspaces  Org  Meetings  Meeting Id  Restore Organizer Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/status": {
       "get": {
         "tags": [

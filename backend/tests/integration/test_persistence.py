@@ -70,6 +70,7 @@ async def test_legacy_tables_remain_alongside_additive_identity_tables():
         "memberships",
         "workspace_invitations",
         "account_sessions",
+        "browser_logins",
         "login_attempts",
         "meeting_access",
         "workspace_audit",

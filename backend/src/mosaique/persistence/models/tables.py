@@ -100,6 +100,9 @@ class Meeting(Base):
     mode: Mapped[str] = mapped_column(
         String(16), nullable=False, default="legacy", server_default="legacy"
     )
+    organizer_revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     organizer_account_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="CREATED")

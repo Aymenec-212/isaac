@@ -297,6 +297,7 @@ def test_migration_is_additive_and_matches_new_model_tables():
             for model in (Organization, Account, Membership, Invitation):
                 model.__table__.to_metadata(metadata)
             metadata.tables["accounts"]._columns.remove(metadata.tables["accounts"].c.display_name)
+            metadata.tables["accounts"]._columns.remove(metadata.tables["accounts"].c.login_generation)
             context = MigrationContext.configure(connection, opts={"target_metadata": metadata})
             with Operations.context(context):
                 module.upgrade()

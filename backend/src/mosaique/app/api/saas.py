@@ -31,7 +31,10 @@ async def current_account(request: Request, db: SessionDep, settings: SettingsDe
         raise Forbidden("Request origin not allowed")
     account, session = await db.run_sync(
         lambda s: Sessions(s).authenticate(
-            request.cookies.get(COOKIE), request.headers.get("x-csrf-token"), mutate=mutate
+            request.cookies.get(COOKIE),
+            request.headers.get("x-csrf-token"),
+            mutate=mutate,
+            touch=request.url.path not in ("/saas/logout", "/saas/logout-all"),
         )
     )
     request.state.account_session = session
@@ -109,7 +112,9 @@ async def profile(body: Profile, actor: Actor, db: SessionDep) -> dict[str, str]
 async def logout(
     actor: Actor, request: Request, response: Response, db: SessionDep
 ) -> dict[str, bool]:
-    await db.run_sync(lambda s: Sessions(s).revoke(request.cookies[COOKIE]))
+    await db.run_sync(
+        lambda s: Sessions(s).logout(actor, request.cookies[COOKIE], all_sessions=False)
+    )
     response.delete_cookie(COOKIE, path="/")
     return {"signed_out": True}
 
@@ -231,12 +236,12 @@ async def activity(actor: Actor) -> dict[str, bool]:
 
 
 @router.post("/logout-all")
-async def logout_all(actor: Actor, response: Response, db: SessionDep) -> dict[str, bool]:
-    from sqlalchemy import delete
-
-    from mosaique.persistence.models.identity import AccountSession
-
-    await db.execute(delete(AccountSession).where(AccountSession.account_id == actor))
+async def logout_all(
+    actor: Actor, request: Request, response: Response, db: SessionDep
+) -> dict[str, bool]:
+    await db.run_sync(
+        lambda s: Sessions(s).logout(actor, request.cookies[COOKIE], all_sessions=True)
+    )
     response.delete_cookie(COOKIE, path="/")
     return {"signed_out": True}
 
@@ -268,6 +273,14 @@ async def audit(org: str, actor: Actor, db: SessionDep) -> list[dict[str, str]]:
     return await db.run_sync(read)
 
 
-@router.get('/workspaces/{org}/meetings/{meeting_id}/access')
+@router.get("/workspaces/{org}/meetings/{meeting_id}/access")
 async def meeting_access(org: str, meeting_id: str, actor: Actor, db: SessionDep) -> list[str]:
     return await db.run_sync(lambda s: Meetings(s).access(actor, org, meeting_id))
+
+
+@router.post("/workspaces/{org}/meetings/{meeting_id}/restore-organizer")
+async def restore_organizer(
+    org: str, meeting_id: str, actor: Actor, db: SessionDep
+) -> dict[str, bool]:
+    await db.run_sync(lambda s: Meetings(s).restore_organizer(actor, org, meeting_id))
+    return {"restored": True}
