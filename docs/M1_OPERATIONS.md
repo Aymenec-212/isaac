@@ -133,3 +133,7 @@ validation separately. Keep database-mutating backend and browser tests sequenti
 The PG migration test applies real revisions in a rollback-only schema and compares
 models plus legacy values; it does not substitute for a sanitized operational
 snapshot rehearsal, migration lock timing, or PostgreSQL 16 CI execution.
+
+Migration rollback must retain the additive tables/columns and mode-aware access
+checks. Do not serve old unfiltered prototype code over enterprise records as an
+operational rollback. No real migration, downgrade or rollback was authorized or run.
