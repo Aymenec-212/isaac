@@ -23,9 +23,38 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="MOSAIQUE_",
         extra="forbid",
+        hide_input_in_errors=True,
     )
 
     environment: Literal["local", "ci", "pilot"] = "local"
+    application_mode: Literal["enterprise", "prototype"] = "enterprise"
+    public_origin: str = "http://localhost:5173"
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = Field(default=None, repr=False)
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> Settings:
+        from urllib.parse import urlsplit
+
+        if self.environment == "pilot" and self.application_mode == "prototype":
+            raise ValueError("pilot must use enterprise application mode")
+        origin = urlsplit(self.public_origin)
+        if (origin.scheme not in ("http", "https") or not origin.netloc
+                or origin.path or origin.query or origin.fragment or origin.username):
+            raise ValueError("public_origin must be an origin without a path")
+        if self.environment == "pilot" and origin.scheme != "https":
+            raise ValueError("pilot requires an HTTPS public_origin")
+        configured = (self.oidc_issuer, self.oidc_client_id, self.oidc_client_secret)
+        if any(configured) and not all(configured):
+            raise ValueError("OIDC issuer, client ID and secret must be configured together")
+        if self.oidc_issuer:
+            issuer = urlsplit(self.oidc_issuer)
+            if (issuer.scheme != "https" or not issuer.netloc or issuer.path != "/"
+                    or issuer.query or issuer.fragment or issuer.username):
+                raise ValueError("OIDC issuer must be an HTTPS origin with trailing slash")
+        return self
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     database_url: PostgresDsn = Field(

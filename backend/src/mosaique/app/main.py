@@ -9,10 +9,11 @@ from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from mosaique import __version__
-from mosaique.app.api import health, meetings
+from mosaique.app.api import health, meetings, saas
+from mosaique.app.auth import oidc
 from mosaique.asr_runtime import build_recognizer
 from mosaique.config.settings import Settings, get_settings
 from mosaique.domain.errors import ErrorCode, MosaiqueError
@@ -48,7 +49,9 @@ async def recover_finalizing_meetings() -> None:
     from mosaique.persistence.repositories.transcript import JobRepository
 
     async with session_scope() as db:
-        stmt = select(Meeting).where(Meeting.state == str(MeetingState.FINALIZING))
+        stmt = select(Meeting).where(
+            Meeting.state == str(MeetingState.FINALIZING), Meeting.mode == "legacy"
+        )
         stranded = (await db.execute(stmt)).scalars().all()
         for meeting in stranded:
             meeting.state = str(MeetingState.COMPLETED)
@@ -66,9 +69,16 @@ async def recover_finalizing_meetings() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    settings: Settings = get_settings()
+    settings: Settings = app.state.settings
     configure_logging(settings.log_level, json_output=settings.environment != "local")
     init_engine(settings)
+
+    if settings.application_mode == "enterprise":
+        try:
+            yield
+        finally:
+            await dispose_engine()
+        return
 
     # Slice 1 runs on fakes end to end. Slice 4 swaps in the Kyutai adapter and
     # Slice 5 a real provider; nothing else in the app changes.
@@ -125,13 +135,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response = await call_next(request)
         finally:
             request_id_var.reset(token)
+        if request.url.path.startswith(("/saas", "/auth")):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["x-request-id"] = request_id
         return response
 
     @app.exception_handler(MosaiqueError)
-    async def handle_domain_error(request: Request, exc: MosaiqueError) -> JSONResponse:
+    async def handle_domain_error(request: Request, exc: MosaiqueError) -> Response:
         """Map internal failures onto stable public codes (tech spec 13.4)."""
         request_id = request_id_var.get() or ""
+        if request.url.path.startswith("/auth/") and "text/html" in request.headers.get(
+            "accept", ""
+        ):
+            return HTMLResponse(
+                '<!doctype html><html lang="fr"><meta charset="utf-8">'
+                "<title>Connexion indisponible · Mosaïque</title>"
+                "<main><h1>Connexion indisponible</h1>"
+                "<p>Votre connexion a expiré ou ne peut pas être vérifiée. "
+                "Réessayez ou contactez votre administrateur.</p>"
+                '<a href="/api/auth/login">Réessayer la connexion</a> · '
+                '<a href="/">Retour à Mosaïque</a></main></html>',
+                status_code=exc.status_code,
+            )
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -160,6 +186,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(health.router)
-    app.include_router(meetings.router)
-    app.include_router(ws_endpoint.router)
+    app.state.settings = settings
+    app.state.oidc_provider = oidc.client(settings) if settings.oidc_issuer else None
+    app.dependency_overrides[get_settings] = lambda: settings
+    if settings.application_mode == "prototype":
+        app.include_router(meetings.router)
+        app.include_router(ws_endpoint.router)
+    else:
+        app.include_router(saas.router)
+        app.include_router(oidc.router)
     return app

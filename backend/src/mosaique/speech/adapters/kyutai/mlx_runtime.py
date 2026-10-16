@@ -115,10 +115,11 @@ def load_weights(hf_repo: str = DEFAULT_HF_REPO) -> _Weights:
             import json
 
             import mlx.core as mx
-            import mlx.nn as nn
             import sentencepiece
             from huggingface_hub import hf_hub_download
-            from moshi_mlx import models
+            from mlx.nn.layers.quantized import quantize
+            from moshi_mlx.models.lm import Lm, LmConfig
+            from moshi_mlx.models.mimi import Mimi, mimi_202407
         except ImportError as exc:  # pragma: no cover - platform dependent
             raise MlxUnavailable(
                 "MLX is not installed. It is macOS/arm64 only; install it with "
@@ -133,20 +134,20 @@ def load_weights(hf_repo: str = DEFAULT_HF_REPO) -> _Weights:
         moshi_weights = hf_hub_download(hf_repo, moshi_name)
         tokenizer_path = hf_hub_download(hf_repo, config["tokenizer_name"])
 
-        lm_config = models.LmConfig.from_config_dict(config)
-        model = models.Lm(lm_config)
+        lm_config = LmConfig.from_config_dict(config)
+        model = Lm(lm_config)
         model.set_dtype(mx.bfloat16)
         if moshi_weights.endswith(".q4.safetensors"):
-            nn.quantize(model, bits=4, group_size=32)
+            quantize(model, bits=4, group_size=32)
         elif moshi_weights.endswith(".q8.safetensors"):
-            nn.quantize(model, bits=8, group_size=64)
+            quantize(model, bits=8, group_size=64)
         if hf_repo.endswith("-candle"):
             model.load_pytorch_weights(moshi_weights, lm_config, strict=True)
         else:
             model.load_weights(moshi_weights, strict=True)
 
         text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_path)
-        audio_tokenizer = models.mimi.Mimi(models.mimi_202407(MIMI_CODEBOOKS))
+        audio_tokenizer = Mimi(mimi_202407(MIMI_CODEBOOKS))
         audio_tokenizer.load_pytorch_weights(str(mimi_weights), strict=True)
         model.warmup()
 
@@ -278,17 +279,18 @@ class MlxBackend:
             self._release()
 
     def _new_gen(self) -> Any:
-        from moshi_mlx import models, utils
+        from moshi_mlx.models.generate import LmGen
+        from moshi_mlx.utils.sampling import Sampler
 
         assert self._weights is not None
         config = self._weights.config.get("lm_gen_config", {})
-        return models.LmGen(
+        return LmGen(
             model=self._weights.model,
             max_steps=self._max_steps,
-            text_sampler=utils.Sampler(
+            text_sampler=Sampler(
                 top_k=int(config.get("top_k_text", 25)), temp=float(config.get("temp_text", 0.0))
             ),
-            audio_sampler=utils.Sampler(
+            audio_sampler=Sampler(
                 top_k=int(config.get("top_k", 250)), temp=float(config.get("temp", 0.8))
             ),
             check=False,

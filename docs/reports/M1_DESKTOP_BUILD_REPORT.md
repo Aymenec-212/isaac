@@ -1,0 +1,483 @@
+# M1 Desktop build report — enterprise SaaS foundation
+
+- Date: 16 October 2026. Branch: `codex/m1-saas-desktop`.
+- Original implementation commit: `1821d4fe9d4924b7f21340c55183bdb5d4aaf9a6`.
+- Starting checkout: `5fbe92b7c8fb241ab020f1196afa646d583991a3` (`codex/m1-saas`).
+- Approved M0/main: `51165577958dbedca74e14067bf9e1c6b31ff324`, unchanged.
+- Status: **Independent Reviewer approved implementation `ebef468`; no unresolved M1 defects. Human authorized the exact pre-existing ASR test exception for M1 merge. Hosted checks remain to execute; production/pilot readiness is not approved.**
+- Scope: AUTH-01..04, persistent meeting metadata/access scaffold, OPS-02 foundation.
+  No M2 media, M3 intelligence, M4 integration or M5 release-readiness implementation.
+- Environment: macOS arm64, Python 3.12.9, uv 0.9.26, Node 23.7.0, PostgreSQL **14.19**.
+  PG16 is configured in CI but has not been run here.
+
+## Demonstrated behavior and affected files
+
+The starting checkout already contained the workspace persistence increment in
+`5fbe92b`; the earlier assertion that no application changes existed was not true
+of this repository. This implementation extends that code rather than replacing it.
+Earlier documentation/infra deletions in the inherited history are not changes
+introduced by this Builder. Review this implementation against `5fbe92b`; review
+the complete milestone history separately against approved M0/main.
+
+- Hosted identity adapter: `app/auth/oidc.py`; account mapping/profile and opaque
+  sessions in `identity/`. Signed local OIDC tests prove issuer/audience/signature/
+  nonce/PKCE checks, one-use browser-bound state, rotation, disabled-account denial,
+  and equal-email identities remaining separate. Hosted registration/recovery are
+  delegated to Auth0, not reimplemented in application password endpoints.
+- `workspaces/service.py` now supports revocable invitation listing, durable audit,
+  and removal of private-meeting grants on membership revocation. Existing last-owner,
+  invitation expiry/address binding and multi-org behavior are retained.
+- `meetings/service.py`, expanded existing `Meeting`, and `MeetingAccess` implement
+  persisted private meeting preparation/list/detail/grant/revoke. An ordinary member
+  may organize; only that organizer controls access. A workspace owner has no implicit
+  private-meeting bypass. Foreign/missing grant targets return the same 404.
+- `app/api/saas.py`, response schemas and shared dependencies expose real authenticated
+  HTTP operations. Commit failure returns an error and rolls back before HTTP success.
+  CSRF and exact Origin checks protect mutations. Session/identity responses are no-store.
+- `app/main.py`, settings, health and legacy repositories enforce explicit process/
+  meeting mode. Enterprise starts no prototype media/job loops and mounts no legacy
+  bearer/guest/WS endpoints. Missing IdP configuration is actionable and unready.
+- `frontend/src/saas/` implements profile, workspace create/switch/rename, member roles/
+  revocation, manual invitation links/acceptance/revocation, meeting preparation/access,
+  and audit display. Settings and meeting panels own their form state. Selected
+  workspace survives reload and stale workspace reads are discarded. Session credentials
+  never enter browser storage. Error/loading/empty states come from real requests.
+- Revision `0005`, model constraints and migration tests preserve existing IDs,
+  raw transcript words/corrections and legacy identities; no claim/backfill/reset is run.
+- `.github/workflows/verify.yml`, lockfiles, ESLint configuration, direct MLX imports,
+  API generation and browser configurations repair verification foundations. The MLX
+  change fixes eight mypy re-export diagnostics without changing model behavior.
+  `ReviewPage` receives a stable memo dependency to satisfy the restored lint gate.
+
+The original 58-file implementation manifest is in [M1_DESKTOP_FILES.txt](M1_DESKTOP_FILES.txt).
+Generated API contracts and package locks account for much of the diff.
+
+## Architectural decisions
+
+Auth0 authenticates; PostgreSQL owns accounts, organizations, memberships, roles,
+meeting access and sessions. Stable issuer/subject maps accounts; email never grants
+legacy ownership or merges accounts. No Auth0 Organizations SDK/domain dependency.
+Existing global accounts leave room for future restricted authenticated guests.
+
+Authlib owns OIDC protocol/signature validation; PyJWT validates signed back-channel
+logout. Browser cookies are opaque, host-only, HttpOnly, SameSite=Lax, Secure on HTTPS.
+Pilot settings require HTTPS and reject prototype mode. Login state/nonce/verifier
+remain in ten-minute database rows. Provider tokens are discarded; no offline scope,
+refresh-token store, custom password cryptography, cache service or queue is introduced.
+
+Application sessions expire after 30 minutes idle or 12 hours absolute. Authenticated
+activity extends idle time only. Login rotates the old browser session; logout,
+logout-all, disable and signed provider revocation remove authority. A stable identity
+transaction advisory lock plus SID tombstone fences logout arriving before the first
+account row or before an in-flight callback commits. No network call holds a DB transaction.
+
+Workspace row locks serialize role changes, invitation redemption and meeting grants.
+Composite tenant/parent constraints reinforce scoped application checks. Revocation
+removes explicit grants. The first review identified that implicit organizer authority
+was still revived by re-invitation; the remediation below corrects that defect. Domain owners
+have no HTTP/provider SDK imports; import fitness tests cover these boundaries.
+
+Existing meeting rows remain canonical. `mode` plus identity constraints distinguish
+legacy hosts from enterprise organizers; there is no fallback after failed enterprise
+authentication. Revisions 0001–0004 are unchanged. Downgrade refuses deletion; any
+operational migration/rollback needs the separate reviewed rehearsal and mode-safe
+application plan described in [operations](../M1_OPERATIONS.md).
+
+## Executed verification
+
+Backend commands use existing `.venv/`; locked dev, protocol and existing optional
+MLX packages were synchronized. No weights, microphone recordings or live providers
+were used. Test DSNs name disposable databases on local port 55432. Full logs are
+local at `/tmp/mosaique-m1-desktop-evidence/` and are not committed.
+
+| Check / command | Observed result |
+|---|---|
+| Backend `.venv/bin/ruff check .` | PASS, all checks passed |
+| Backend `.venv/bin/mypy` | PASS, 115 source files |
+| Focused final `pytest tests/integration/test_workspace_migration.py tests/integration/test_oidc.py tests/integration/test_saas_foundation.py tests/unit/test_identity_settings.py tests/unit/test_identity_logging.py -q -rs` | **29 passed**, one Authlib deprecation warning, 2.29s |
+| Broad `pytest tests/unit tests/integration tests/realtime -q -rs` | **1 failed, 515 passed, 1 skipped, 1 deselected**, one warning, 102.56s. Last broad sweep precedes the final target-ID concealment tightening; the final focused run above tests that change. |
+| Unchanged starting commit, same broad command, isolated copy/DB with corrected subprocess PYTHONPATH | **2 failed, 485 passed, 1 skipped, 1 deselected**, 101.14s |
+| Actual migration 0001→0005 functions in rollback-only PG schema | PASS in focused suite: preserved legacy values including words/corrections; full model/schema comparison empty |
+| Disposable `pg_dump -Fc`, new database, `pg_restore`, row-count/content-hash comparison | PASS: **17 tables match**, including 2 transcript segments, 2 audio-session metadata rows, meeting output and accounts. DB-only backup; audio/object storage recovery is not demonstrated. |
+| Frontend `npm run lint`, `npm run typecheck`, `npm run build` | PASS |
+| Frontend `npm test` | PASS: 15 files / **115 tests**; existing contrast script passes with its three explicitly reported known gaps |
+| `npm run test:e2e:saas` | PASS: **1** complete two-account workspace/invitation/private-access/revocation/profile/logout browser journey, 7.0s on final transaction behavior |
+| `npm run test:e2e:prototype` | PASS: **28** existing browser tests, 2.4m before the final transaction lifetime tightening |
+| `npm run test:e2e:prototype -- e2e/meeting.spec.ts` after that tightening | PASS: **1** original create/join/transcribe/end/reload journey, 11.6s |
+| Export enterprise OpenAPI to temporary file and `cmp` committed contract; regenerate both TS contracts | PASS; no legacy contract removal |
+| `git diff --check`, staged diff inspection | PASS |
+| `npm audit --package-lock-only --json`, current versus starting lockfile | Same **10** advisory packages and severity counts: 2 critical / 5 high / 3 moderate. Existing toolchain dependency risk, not newly introduced by ESLint; not remediated in this milestone. |
+| GitHub Actions / Linux PG16 / real Auth0 / production migration | **NOT RUN**, no push/provider provisioning/operational data authorized |
+
+### Baseline versus new failures
+
+The remaining failure is
+`tests/realtime/test_idle_and_pause.py::test_a_silent_participant_does_not_claim_the_recognizer_stream`:
+the existing prototype opens a silent participant's ASR stream. It reproduces on
+unchanged `5fbe92b`. No media-runtime implementation change was made to hide it.
+CI deliberately continues to run that test and will be red until it is resolved.
+
+The starting commit also failed its assertion that the entire schema still contains
+only eight tables, despite its already-added 0004 identity tables. The assertion now
+checks the full additive schema. Baseline missing ESLint and eight MLX mypy errors
+are repaired. Four initial sandbox socket failures disappear with authorized local
+socket execution; they are not application regressions.
+
+An early browser attempt overlapped a database-mutating suite and was invalid;
+sequential reruns pass. An early baseline subprocess imported the working tree;
+corrected PYTHONPATH produces the two-failure comparison above. A broad run under
+parallel load also observed a prototype final/gap timing assertion; isolated and
+sequential reruns passed. These attempts are not presented as final new regressions.
+The existing opt-in real MLX test remains skipped and the marked slow run excluded,
+with no new skips or exclusions. Authlib emits a transport deprecation warning;
+its supported successor has not been substituted speculatively.
+
+## Acceptance limits and operational blockers
+
+AUTH-01..04 remain **implemented/not verified** as complete criteria. Local SQL,
+HTTP, cryptographic mock-provider and browser evidence proves their implemented
+subfeatures, not a live enterprise rollout. OPS-02 is implemented/not verified
+because hosted CI has not executed and the baseline regression remains red.
+
+1. Auth0 plan suitability, region/residency/cost, approved credentials and real
+   two-account registration/login/recovery/back-channel delivery remain gates.
+   [Auth0 documents back-channel logout](https://auth0.com/docs/authenticate/login/logout/back-channel-logout)
+   as an Enterprise-plan capability. No purchase/provisioning is authorized. If the
+   plan is unsuitable, review an alternative event-delivery integration before rollout.
+2. Password-recovery invalidation depends on configuring and verifying that event
+   delivery. An outage can delay local revocation; no immediate-revocation claim.
+3. Actual PG16/hosted CI and a sanitized operational legacy snapshot rehearsal,
+   reviewed ownership mappings/backfill, migration lock timing and production
+   rollback are unverified. Existing history is quarantined from new accounts.
+4. LiveKit tokens/WS/media revocation and active-call expiry/rejoin are M2 gates.
+   M1 has no call: the authenticated activity operation is tested, but M2 must drive
+   it from actual participation so long speaking/listening does not look idle.
+5. Organizer transfer and implicit administrative private access remain absent.
+   The approved remediation policy adds explicit, audited owner restoration of the
+   original organizer; re-invitation alone restores no meeting authority. Lists expose
+   the latest 100 records; pagination/export, retention/deletion, operational cleanup
+   and broader security hardening remain limitations, detailed in the operations guide.
+6. Baseline prototype ASR failure, dependency advisories and absent live acceptance
+   preclude a green release/readiness claim. Independent review returned the three findings addressed below; re-review and human approval remain required.
+
+No external account, paid resource, provider credential, real customer recording,
+production migration, ticket write, push, merge or deployment was performed. The
+local test cluster is stopped after verification; its disposable files/evidence
+remain under `/tmp` for reproduction.
+
+## Independent Reviewer handoff
+
+Review implementation `1821d4f` against `5fbe92b`, plus inherited M1 changes against
+M0/main. Highest-risk paths: OIDC state consumption and fixed redirects; SID/logout
+races (including before first account); cookie/Origin/CSRF and expiry; tenant-safe
+grant targets; workspace locks/last owner; invitation replay/revoke; composite FKs
+and legacy preservation; commit-before-response failure handling; UI stale responses
+and no credential storage. Reproduce real PostgreSQL tests, inspect CI rather than
+assuming it ran, and keep provider mocks distinct from live Auth0 evidence.
+
+The original self-inspection did not catch local logout/callback races or implicit
+organizer revival. Its provider-SID fencing and explicit-grant tests were insufficient
+for those cases. See the focused remediation evidence below. Human approval remains
+required before merge.
+
+
+## Independent-review remediation — 16 October 2026
+
+Review baseline: `b733e1567fb43bd2a6b47d2946cd8018d774d030`, clean working tree.
+First remediation commit: `252be30c3fa77340b86ae225025c8645419cdb19`. The original
+implementation/evidence above remains historical; the findings and results in this
+section supersede its incomplete logout and organizer-revocation claims.
+Scope: AUTH-01, AUTH-03/04, OPS-02. No M2 or deployment behavior is implemented.
+
+| Verified finding | Status and affected files | Regression evidence / limitations |
+|---|---|---|
+| P1 local logout / logout-all versus OIDC callback | Fixed locally: `identity/sessions.py`, `app/auth/oidc.py`, `app/api/saas.py`, identity models, revision `0006` | Before changes, both exchange-paused endpoint tests failed (late callback 303 after logout 200). Final deterministic event-driven tests cover both endpoints during exchange, immediately before atomic validation, and immediately before session insertion while locks are held. They also cover another anonymous browser on logout-all and a legitimate new login while an old cancelled exchange remains in flight. No sleeps or process-local production locks. Live Auth0 remains unverified. |
+| P2 missing offline deployment validator | Fixed: restored `infra/azure/check-parameters.py` byte-for-byte from approved main `5116557`; scope documented in adjacent README; `.github/workflows/verify.yml` now runs retained offline tests | Before restoration, unittest import failed with FileNotFoundError. After restoration all 5 cases pass. Original validator uses stdlib and ARM parameter JSON only; deleted VM templates/Bicep examples are not dependencies and remain retired. No Azure call/deployment. |
+| P2 organizer authority revives after removal/re-invitation | Fixed locally: `workspaces/service.py`, `meetings/service.py`, meeting model, revision `0006`, SaaS restoration route and generated enterprise API contract | HTTP regression covers removal, re-invitation, list/detail denial, access-list and grant-management denial, forbidden self-restoration, explicit owner restoration and audit. Existing explicit-grant regression still passes. No owner private-visibility bypass or ownership transfer. |
+
+### Boundary decisions and self-review
+
+`Sessions` owns login start/completion/cancellation. A durable browser row records
+its generation; login attempts capture that generation and a database sequence
+value. Logout increments the browser generation and revokes all its sessions.
+Logout-all additionally advances the account's sequence floor and revokes all
+account sessions. This also cancels older anonymous attempts in other browsers
+whose stable provider identity was not yet known when they began. New attempts
+receive a later sequence value and remain legitimate.
+
+Completion locks the stable issuer/subject, then the browser row, and checks both
+generations, account state, provider SID tombstone and deadline before issuing a
+session in the same transaction. Logout uses the same lock order. If completion
+wins, logout waits and revokes its issued session before acknowledging success.
+Logout authentication validates CSRF/expiry without first taking a session-row
+write lock, avoiding reversed lock order. Rotation and provider logout retain
+revoked session rows so the browser binding survives issuance races; authentication
+rejects those rows. No database transaction spans provider network I/O.
+
+Membership removal stamps `Meeting.organizer_revoked_at` and removes explicit
+access grants under the existing workspace lock. List/detail/management share the
+organizer authority predicate. Rejoining clears membership revocation only.
+`restore-organizer` requires an enabled owner and an enabled active membership for
+the original organizer, and writes an audit event. It neither transfers ownership
+nor makes private records visible to owners implicitly. This small explicit action
+implements the user's restoration policy without a new role/permission framework.
+
+Revision `0006` is additive, preserves existing sessions and legacy content, cancels
+pre-upgrade pending attempts, and backfills organizer revocations from both current
+membership revocation and prior `membership.revoked` audit history (including an
+already-reinvited member). A synthetic real-migration test verifies these cases and
+an empty model/schema diff. Existing revisions are unchanged. Mixed-version writers,
+operational lock timing and rollback remain separate gates; drain old processes.
+Cancellation state cleanup is deliberately not improvised: retain browser/session
+bindings while any associated session or callback could be valid; review retention
+before operating at scale. See [operations](../M1_OPERATIONS.md).
+
+Self-review inspected the complete remediation diff for domain/HTTP boundaries,
+lock ordering, grant-rule duplication, legacy preservation and unrelated ASR changes.
+There is one identity cancellation owner and one organizer authority predicate;
+no provider domain, generic authorization framework or media behavior was added.
+
+### Remediation verification
+
+All PostgreSQL evidence uses the disposable local PG **14.19** instance on port
+55432, Python 3.12.9 and synthetic data. Local logs:
+`/tmp/mosaique-m1-remediation/`. These are local checks, not hosted CI evidence.
+Backend/database-mutating browser checks run sequentially.
+
+| Command / check | Actual result |
+|---|---|
+| `pytest tests/integration/test_workspace_migration.py tests/integration/test_oidc.py tests/integration/test_saas_foundation.py tests/unit/test_workspaces.py -q -rs` | **43 passed**, one existing Authlib deprecation warning, 3.54s |
+| `pytest tests/unit tests/integration tests/realtime -q -rs` | **524 passed, 1 failed, 1 skipped, 1 deselected**, one warning, 102.55s. Only failure is the independently established silent-participant baseline. This sweep predates the final two additional new-login/old-exchange tests; the final targeted run includes both. |
+| `.venv/bin/ruff check .` / `.venv/bin/mypy` | PASS / PASS, **116 source files** |
+| Root `backend/.venv/bin/python -m unittest discover -s deploy/asr -p 'test_*.py' -v` | **5 passed** (0.006s); now explicitly included in backend CI job |
+| `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` | PASS; **15 files / 115 unit tests**; contrast checker retains the same 3 documented gaps |
+| Enterprise OpenAPI export and `npm run generate:saas-api` | PASS; regenerated 24-path contract adds only explicit organizer restoration. Fresh exports of both enterprise and 13-path prototype contracts match tracked files. |
+| Fresh disposable UTF-8 DB: `.venv/bin/alembic upgrade head` / `.venv/bin/alembic check` | PASS, actual 0001→0006 chain / no new upgrade operations detected |
+| `npm run test:e2e:saas` | **1 passed**, complete seeded two-account journey, 7.8s |
+| `npm run test:e2e:prototype` | **28 passed**, all existing browser journeys, 2.2m |
+| Final working-tree/diff inspection, `git diff --check`, retained validator comparison with approved main | PASS; only intended remediation files; no ASR changes; `main` unchanged |
+
+### Baseline failure investigation and remaining gates
+
+The unchanged prototype `_open_participant` in `realtime/sessions/meeting.py`
+starts `_open_stream` on join. That creates audio metadata/file state and launches
+`_pump`, which opens the recognizer before the first frame. This explains the
+silent-participant assertion. Deferring that lifecycle requires coordinated
+reconnect/capture/idle-close and resource-cleanup verification; removing a line merely
+to turn this focused M1 report green is not a safe authorization fix. No ASR source
+or tests were changed, suppressed or excluded. The existing opt-in MLX skip and slow
+deselection remain; no new skips. The initial restricted sandbox PostgreSQL attempt
+failed on socket permission and was rerun with authorized local access; it is not
+an application regression. A separate migration bootstrap initially used the
+cluster's SQL-ASCII maintenance database, causing driver string decoding to fail;
+creating an explicitly UTF-8 disposable database resolved it without application
+changes. The real upgrade/check then passed.
+
+The three reported findings are fixed in local tests and submitted for independent
+re-review, **not** a declaration that M1 is complete. Live Auth0 hosted registration,
+recovery/back-channel delivery and plan/residency authorization remain unverified.
+Hosted CI/Linux/PG16, sanitized operational migration/backup/rollback rehearsal,
+old-process draining and migration timing remain unverified. Existing dependency
+advisories and baseline ASR failure remain. M2 media revocation/active-call expiry
+remain future milestone gates. No external account, cost, live credentials, push,
+merge or deployment occurred.
+
+Reviewer focus: reproduce callback race tests in both lock orderings, inspect the
+sequence/browser generation invariants and soft-revoked binding lifetime; inspect
+removal/rejoin/restoration authorization and audit; rehearse `0006` against reviewed
+historical data; verify retained offline dependency and CI command; distinguish local
+PG14/mock-provider evidence from the outstanding external gates.
+
+
+## Follow-up remediation — account/session lock inversion
+
+Starting review commit: `252be30c3fa77340b86ae225025c8645419cdb19`, clean checkout
+on `codex/m1-saas-desktop`. The independent Reviewer confirmed all three earlier
+findings resolved, then reproduced a new account/session deadlock. This section
+supersedes the prior self-review's claim that the full lock order was consistent.
+Repair commit: `ebef4684f982f063c737deaf76cf8b65e71d32c7` (subsequently independently approved). Scope: AUTH-01 and
+OPS-02; no schema/API changes, M2 work, frontend changes or ASR modifications.
+
+| Finding | Status / files | Proof and remaining limits |
+|---|---|---|
+| Logout-all deadlocks with profile updates; account-wide revocation can roll back | Fixed locally in `identity/sessions.py`; two HTTP/PostgreSQL regressions in `tests/integration/test_saas_foundation.py`; lock contract in `docs/M1_OPERATIONS.md` | Before repair, deterministic profile-first test observed profile **200**, logout-all **500**, SQLSTATE **40P01**. After repair both commit, account generation advances and both account sessions are revoked. In the reverse ordering, logout-all commits and waiting profile returns **401**, leaving the profile unchanged. Independent re-review required. |
+
+### Root cause and lock-path inspection
+
+Authentication previously acquired `AccountSession FOR UPDATE` and held it through
+the profile account update. Logout-all, after its identity/browser boundary work,
+could autoflush `Account.login_generation` before updating the held session. Each
+transaction then waited for the other's row. Callback account upsert followed by
+old-session revocation had the same account-before-session requirement, so merely
+reordering one logout flush would leave another inversion.
+
+Authentication now discovers the immutable session/account binding without locking
+that session, locks the account with PostgreSQL `FOR NO KEY UPDATE`, then locks and
+refreshes the session before validating revocation/expiry/CSRF and touching idle time.
+Logout explicitly acquires the same account lock before any browser/session mutation.
+This repairs the resource acquisition order, without retries, delays, new interfaces,
+services or transaction side-effect replay. `key_share=True` in SQLAlchemy's write-lock
+mode compiles to `FOR NO KEY UPDATE`; it does not mean `FOR KEY SHARE`.
+
+Inspected paths and ordering (plain MVCC reads do not acquire row write locks):
+
+| Path | Locks and interaction |
+|---|---|
+| Ordinary authenticated request / profile update | Account NO KEY UPDATE → session FOR UPDATE → handler's workspace locks if needed; profile updates its already-locked account. Same-account requests serialize until transaction commit. |
+| Local logout / logout-all | Authentication is read-only (`touch=False`); stable-identity advisory lock → account NO KEY UPDATE → browser if bound → session revocation. Generation writes cannot first acquire account while holding session. |
+| OIDC callback completion | Stable-identity advisory lock → account upsert → browser → old-session revocation/new-session insertion. No network work under these locks; durable generation/SID fencing unchanged. |
+| Login start / browser rebinding | Stable-identity advisory lock for prior account → sorted browser locks → prior-session binding write. No account-row mutation or later account write lock. Attempt consumption commits separately before callback provider exchange. |
+| Signed provider logout | Stable-identity advisory lock → SID tombstone → matching-session revocation. Account lookup is nonlocking; no later account write. |
+| Session issue/revoke helpers | Account lookup is nonlocking; issue called by callback already has its account lock. Revocation updates sessions, then insertion checks account FK with compatible KEY SHARE. Neither helper later modifies the account. |
+| Workspace/membership/audit operations | Protected request acquires actor account/session before workspace lock. Reads of other accounts are MVCC; account FK checks use KEY SHARE, compatible with the new NO KEY UPDATE lock. Using stronger FOR UPDATE here could introduce avoidable FK contention/inversions. |
+
+No new account/session inversion was found in these application paths. Operator
+maintenance and future identity writers must preserve the contract; this is not a
+claim that every possible PostgreSQL deadlock is impossible. Account write locks now
+serialize same-account protected requests across sessions; there is no load benchmark
+or new cache/worker system. No retry infrastructure is needed for the verified cycle.
+
+The regressions coordinate real HTTP transactions with asyncio events and PostgreSQL
+`pg_blocking_pids`, not assumed sleep durations. The profile-first test waits until
+logout is actually blocked before releasing profile. The reverse test pauses the
+actual account-lock SELECT and waits until profile blocks on it. Hooks are test-only,
+bounded waits and transaction cleanup run in `finally`, and the engine listener is
+removed. Both tests check durable data and reject revoked tokens afterward.
+
+### Executed follow-up verification
+
+Environment remains local macOS arm64/Python 3.12.9/PG **14.19** with synthetic data;
+PG16 is still unverified. Logs: `/tmp/mosaique-m1-lock-order/`.
+The first test connection attempt preceded rebinding our disposable cluster from its
+default port to isolated port 55432, so it failed with connection refused; the actual
+before/after results below are subsequent valid runs. No application workaround or
+new skip was used. Frontend/browser checks were not rerun for this backend-only
+repair; their prior evidence remains historical, not newly claimed verification.
+The existing opt-in MLX skip and marked slow deselection are unchanged.
+
+| Check | Actual result |
+|---|---|
+| New profile-first regression on unchanged application code | **FAIL as expected**, `(profile=200, logout-all=500, SQLSTATE=40P01)`, 1.89s |
+| Full `pytest tests/unit tests/integration tests/realtime -q -rs` after final implementation/test edits | **528 passed, 1 failed, 1 skipped, 1 deselected**, existing Authlib warning, 102.93s. Only failure: `test_a_silent_participant_does_not_claim_the_recognizer_stream`, independently established on baseline. No new regression or new skip/exclusion. |
+| Root `backend/.venv/bin/python -m unittest discover -s deploy/asr -p 'test_*.py' -v` | **5 passed**, 0.004s |
+| Diff/working-tree inspection and `git diff --check` | PASS; only session lock implementation, its regressions, operations lock contract and this report changed. No schema/ASR/frontend changes; main unchanged. |
+| Targeted `pytest tests/integration/test_saas_foundation.py tests/integration/test_oidc.py tests/integration/test_workspace_migration.py tests/unit/test_workspaces.py -q -rs` | **45 passed**, existing Authlib warning, 3.51s. Includes both new lock orderings, all previous OIDC exchange/issuance/generation fences and membership/organizer restoration/migration checks. |
+| `.venv/bin/ruff check .` / `.venv/bin/mypy` | PASS / PASS, **116 source files** |
+
+### Existing silent-participant ASR regression
+
+Root cause confirmed by inspecting `realtime/sessions/meeting.py`: `_open_participant`
+(line 309) calls `_open_stream` on join, before any audio frame. `_open_stream` adds
+`_sessions`, creates audio metadata/file state and starts `_pump` (line 379).
+`_pump` calls `recognizer.open_session` (line 613) before waiting on `next_frame`.
+Roster presence therefore consumes recognizer resources. With the existing
+single-stream MLX runtime, a silent host/observer can occupy the available stream
+and prevent the actual speaker from transcribing. The first test assertion can race
+the queued join event; its later assertion still exposes real premature allocation.
+
+A **separate focused prototype lifecycle fix is warranted**: separate roster presence
+from allocation until first audio, preserve per-capture reconnect/sequence anchors,
+idle-close/reopen behavior, and ensure silent disconnect/end tears down cleanly.
+The existing first-frame reopening path at `_on_frame` is relevant, but changing join
+also needs explicit roster/reconnect/cleanup coverage. It is not an account/session
+security fix. No ASR source or tests are changed here and no failure is suppressed.
+
+### Review and external gates
+
+Re-review the explicit account-before-session locks, compatible lock strength,
+post-wait session refresh, profile/logout ordering tests, callback fences and the
+path audit above. No migration is introduced. The earlier three findings remain
+resolved per the independent Reviewer; the human has now confirmed independent approval of this repair at `ebef468`.
+M1 is **not declared complete**. Live Auth0 registration/recovery/event delivery,
+approved provider provisioning/region/cost, hosted CI/Linux/PG16 and sanitized
+operational migration/backup/rollback/old-process-drain verification remain gates.
+The pre-existing ASR failure and dependency advisories remain documented blockers.
+No push, merge, deployment or external writes occurred.
+
+
+## M1 merge preparation — human-approved baseline exception
+
+The human owner confirmed independent approval of
+`ebef4684f982f063c737deaf76cf8b65e71d32c7`, with no unresolved M1 defects, and
+explicitly authorized only the independently verified M0 silent-participant ASR
+failure as an M1 merge exception. The latest status supersedes earlier pending-review
+statements; [QUALITY_GATES](../QUALITY_GATES.md#m1-only-baseline-exception--m2-asr-001)
+records the exact test, authority, reason, limits and production-readiness distinction.
+[M2-ASR-001](../follow-ups/M2-ASR-001.md) is a tracked **open** follow-up, assigned to
+M2 lifecycle work with closure evidence; no M2 implementation is started.
+
+The existing generic reviewer-prompt edit was inspected and committed separately as
+`4d57679` (`docs: distinguish milestone review and merge readiness`). It keeps reviews
+independent and read-only, distinguishes baseline defects from new regressions, and
+separates implementation/merge/production approval. Its prior final-gate sentence
+was reconciled with explicit human exceptions without adding an M1-specific waiver
+to the generic prompt.
+
+Merge preparation changes only CI, its opt-in exception policy/tests and docs.
+`tools/m1_merge_exception.py` uses pytest strict XFAIL for the exact node and only
+the original silent-allocation assertion, leaving the legacy test body and ASR
+implementation unchanged. Different failures in that same test remain fatal. Ten
+subprocess policy cases exercise known failure, default raw failure, strict XPASS,
+changed assertion, runtime/setup/teardown errors, another failing test, and absent
+or duplicate collection. Expected failures are visible in `-rxXs`, JUnit and the
+workflow summary; no job-wide continue-on-error or hidden deselection is used.
+
+### CI configuration inspection
+
+| GitHub Actions job | Configured checks |
+|---|---|
+| `backend` (Ubuntu, Python 3.12, **postgres:16**) | Frozen dev/protocol dependencies; Ruff; application mypy and explicit exception-plugin mypy; all five offline deployment-security tests; actual Alembic 0001→head upgrade and schema drift check; selected unit/integration/realtime suite including concurrency/authorization/migration tests, ten policy cases and the executed strict expected baseline failure; always-uploaded JUnit and explicit exception summary. |
+| `browser` (Ubuntu, Node 24, Python 3.12, **postgres:16**) | Frozen backend dependencies and `npm ci`; frontend ESLint, TypeScript, unit/contrast checks and production build; both OpenAPI exports plus generated TypeScript contract drift checks; real Alembic upgrade; Chromium install; SaaS and all legacy prototype Playwright suites; failure traces/artifacts. |
+
+Both jobs run on push/pull request without a dependency that could suppress one
+because the other failed. No workflow/step failure is globally tolerated. As usual,
+a failed prerequisite can prevent later dependent steps; it still fails its job.
+The existing opt-in real MLX test and slow-marker exclusion are unchanged and are
+not new exceptions. Real GPU/provider evidence remains separately gated.
+
+Local workflow validation uses pinned **actionlint 1.7.7** (PASS). It validates
+workflow syntax, expressions, job/step structure and action inputs; ShellCheck is
+not installed locally, so it does not provide a separate shell-lint claim. The only
+new shell block is the literal job-summary heredoc. Local evidence uses PG **14.19**,
+not PG16. The fresh synthetic migration database and test cluster remain disposable.
+Logs/JUnit: `/tmp/mosaique-m1-merge-prep/`; policy-only log also at
+`/tmp/m1-exception-policy.txt`.
+
+### Executed merge-preparation evidence
+
+| Check | Actual result |
+|---|---|
+| Full configured backend suite with explicit plugin and JUnit (local `.venv/bin/pytest -p tools.m1_merge_exception tests/unit tests/integration tests/realtime -q -rxXs --junitxml=...`) | **538 passed, 1 xfailed, 1 skipped, 1 deselected**, existing Authlib warning, 105.91s; exit 0. The only XFAIL is the authorized exact assertion. The skip is the unchanged opt-in real MLX test; slow deselection is unchanged. |
+| Raw exact legacy test without plugin | **1 failed** as expected, 0.82s, pytest exit 1; confirms unchanged execution/failure rather than a hidden skip |
+| Exception policy alone, final source | **10 passed**, 2.27s; validates failed/XPASS/missing/duplicate/fixture/other-regression cases remain fatal and default invocation retains failure. |
+| Actual backend JUnit inspection | PASS; no `<failure>`/`<error>` entries, exactly the named baseline case has `skipped type="pytest.xfail"` and explicit human-approved/M2-ASR-001 reason. |
+| Ruff / application mypy / explicit plugin mypy | PASS / PASS (116 source files) / PASS (1 source file). Explicit plugin check is also configured in Actions. |
+| Frontend ESLint / TypeScript / unit+contrast / build | PASS; **115 tests / 15 files**, 43 contrast pairs pass with the same three documented gaps. No frontend source changes. |
+| Fresh synthetic UTF-8 database: Alembic 0001→0006 upgrade / `alembic check` | PASS / no new upgrade operations detected on local PG14.19 |
+| Offline deployment security unittest | **5 passed**, 0.003s |
+| Final workflow `actionlint` 1.7.7 | PASS, exit 0; hosted jobs themselves not executed |
+| Git diff / legacy ASR/test comparison | PASS; no application or legacy ASR/test changes; main unchanged. Generated frontend build metadata restored. |
+
+No new application regression was found. An early synthetic duplicate-node policy
+case used duplicate CLI node arguments that pytest deduplicates; the policy test
+was corrected to request actual duplicate file collection with `--keep-duplicates`.
+All ten cases now pass. An explicit plugin mypy check identified an overly narrow
+callback parameter annotation; it was widened to `BaseException` (pytest already
+restricts it to `AssertionError`) without changing predicate behavior, and the final
+policy/type checks pass. These were preparation-check corrections, not hidden app
+failures. Browser suites are configured unchanged and were not rerun in this
+docs/CI-only pass; their previously reported 29 passing journeys remain historical.
+
+A concise proposed PR description is saved in [M1_PR_DESCRIPTION.md](M1_PR_DESCRIPTION.md).
+
+Hosted GitHub execution is still **NOT RUN**: Linux runner/action execution, PG16,
+Node 24/browser installation, artifact/summary rendering and required-check results
+must be confirmed after an authorized push/PR. Repository branch-protection settings
+must require the `backend` and `browser` jobs of `Verify`; those settings were not
+changed or claimed verified locally. No push, PR creation or merge occurred here.
+
+Real Auth0 hosted registration/login/recovery, revocation-event delivery and approved
+provider region/cost, sanitized operational migration/restore/rollback and old-process
+draining remain deployment/pilot gates. This merge exception does not waive them or
+claim full live acceptance. No ASR code/test weakening, deployment or unrelated
+application change was made.

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Mosaique - realtime meeting intelligence, French-first"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115",
+    "fastapi>=0.141.1",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
@@ -14,6 +14,8 @@ dependencies = [
     "python-ulid>=3.0",
     "pyjwt>=2.10",
     "structlog>=24.4",
+    "authlib>=1.6,<2",
+    "httpx>=0.28,<1",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +30,7 @@ dev = [
     # real client. It arrives transitively via uvicorn[standard]; naming it
     # here keeps the harness working if that ever changes.
     "websockets>=13.0",
+    "types-authlib>=1.8.0.20260911",
 ]
 
 # ADR-13 consequence 5. MLX is macOS/arm64 only, so it is an extra behind an

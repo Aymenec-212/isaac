@@ -26,6 +26,9 @@ TEST_DSN = os.environ.get(
 os.environ.setdefault("MOSAIQUE_DATABASE_URL", TEST_DSN)
 os.environ.setdefault("MOSAIQUE_TOKEN_SECRET", "test-secret-at-least-32-characters-long")
 os.environ.setdefault("MOSAIQUE_ENVIRONMENT", "ci")
+os.environ.setdefault("MOSAIQUE_APPLICATION_MODE", "prototype")
+os.environ["MOSAIQUE_LLM_PROVIDER"] = "fake"
+os.environ["MOSAIQUE_ASR_RUNTIME"] = "fake"
 
 
 @pytest.fixture(scope="session")
@@ -122,11 +125,11 @@ async def runtime(engine):  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture
-async def client(engine, runtime) -> AsyncIterator[AsyncClient]:  # type: ignore[no-untyped-def]
+async def client(engine, runtime, settings) -> AsyncIterator[AsyncClient]:  # type: ignore[no-untyped-def]
     """ASGI client that skips lifespan, since the engine fixture already owns it."""
     from mosaique.app.main import create_app
 
-    app = create_app()
+    app = create_app(settings)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -224,10 +227,10 @@ class WsClient:
 
 
 @pytest.fixture
-async def ws_client(engine, runtime):  # type: ignore[no-untyped-def]
+async def ws_client(engine, runtime, settings):  # type: ignore[no-untyped-def]
     from mosaique.app.main import create_app
 
-    app = create_app()
+    app = create_app(settings)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         yield WsClient(http=http, app=app)

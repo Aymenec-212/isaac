@@ -61,3 +61,48 @@ checks are NOT RUN; M2 acceptance remains gated on authorization and real eviden
 - M5 Hardening: OPS-01..03 and release/pilot readiness review.
 
 CI coverage and required live checks may evolve; changes to acceptance criteria require an explained, reviewed update, not quiet weakening.
+
+### M1 workspace persistence increment — 16 October 2026
+
+[M1 builder evidence](reports/M1_BUILD_REPORT.md) records a **partial** backend-only
+increment supporting AUTH-02..04: application-owned account/membership tables,
+workspace operations, expiring single-use invitations and revocation/role checks.
+Deterministic SQLite tests verify this module's behavior, not the complete criteria.
+No complete AUTH criterion is implemented/verified by this increment; the full
+criterion statuses above remain unchanged. Auth0, HTTP/session/browser flows,
+enterprise meeting access and real PostgreSQL migration/concurrency verification
+remain outstanding. Legacy prototype credentials do not authorize these accounts.
+M1 is not done and no later milestone has started.
+
+### M1 Desktop implementation — 16 October 2026
+
+The [Desktop build report](reports/M1_DESKTOP_BUILD_REPORT.md) supersedes the earlier
+backend-only increment report for current M1 status. Human approval selected Auth0,
+PKCE, server-owned sessions/tenancy, verified single-use revocable invitations and
+30-minute idle/12-hour absolute defaults. No provisioning/live credentials are approved.
+
+| IDs | Complete criterion status | Observed increment / remaining gate |
+|---|---|---|
+| AUTH-01 | implemented/not verified | Signed deterministic OIDC validation, cookie rotation/logout/revocation/expiry, profile persistence; Auth0 hosted registration/recovery and real two-account login not run |
+| AUTH-02 | implemented/not verified | Actual PostgreSQL HTTP and local two-account browser workspace/invitation journey; real-provider account onboarding remains unverified |
+| AUTH-03 | implemented/not verified | API IDOR/private-meeting grants/org switching and database constraints tested; enterprise mounts no prototype WS/token/job surface. Future M2/M3 surfaces require their own tests |
+| AUTH-04 | implemented/not verified | Removed members lose HTTP meeting access and grants; re-invite does not restore grants. LiveKit issuance/revocation remains explicitly M2 |
+| OPS-02 | implemented/not verified | Lint/type repairs, real verification workflow and local commands exist. Hosted CI/PG16 not executed; known prototype regression remains red |
+
+No later-milestone criterion changes status. The local browser fixture seeds server
+sessions directly in a disposable database; it is not a provider login bypass in the
+application and does not prove real Auth0 acceptance. See [operations](M1_OPERATIONS.md)
+for configuration, recovery-event delivery, session/meeting continuity and legacy gates.
+
+
+### M1 merge preparation — explicit baseline exception
+
+The human owner reports independent approval of implementation
+`ebef4684f982f063c737deaf76cf8b65e71d32c7` with no unresolved M1 defects.
+The sole pre-existing silent-participant ASR failure has an explicit, test-specific
+[human-approved M1 merge exception](QUALITY_GATES.md#m1-only-baseline-exception--m2-asr-001)
+and tracked [M2-ASR-001](follow-ups/M2-ASR-001.md) follow-up. It remains executed and
+visible as strict XFAIL in CI; ordinary pytest still fails. Hosted CI/PG16 and real
+Auth0/operational migration gates remain unverified. The implemented/not-verified
+full acceptance statuses above are not promoted to production verification by this
+merge preparation. See the latest [build evidence](reports/M1_DESKTOP_BUILD_REPORT.md).
