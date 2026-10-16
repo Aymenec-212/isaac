@@ -21,4 +21,76 @@ Try to reproduce material issues using safe, non-destructive commands. Read-only
 
 Produce `templates/REVIEW_REPORT.md`-style output, **findings first**, ordered by severity. Every finding should include file:line, evidence/reproduction, affected acceptance ID, operational impact and smallest corrective direction; clearly label uncertainty. Then supply an acceptance table and actual checks run.
 
-Final gate must be **APPROVE**, **CHANGES REQUIRED**, or **BLOCKED**, with reasons. Do not approve if any relevant P0/P1 remains, required tests fail, or key acceptance behavior is unverified. **Do not modify files.**
+Final gate must be **APPROVE**, **CHANGES REQUIRED**, or **BLOCKED**, with reasons. State whether the decision concerns implementation, merge, or production readiness. Do not approve unresolved relevant P0/P1 defects or unverified required implementation behavior. Failed quality gates require an explicit documented human exception for merge; unverified live/operational gates still block production readiness. **Do not modify files.**
+
+## Review scope, baseline defects, and merge decisions
+
+### 1. Review the milestone, not the entire product
+
+Evaluate the current milestone against:
+
+- Its approved requirements and acceptance criteria.
+- Its implementation diff against the agreed baseline.
+- Architectural invariants and system boundaries affected by its changes.
+- Relevant dependencies and neighboring components where regressions could occur.
+
+Do not expand the review into unrelated subsystems merely because they contain existing technical debt.
+
+Cross-module defects introduced or exposed by the milestone remain in scope.
+
+### 2. Distinguish baseline defects from new regressions
+
+When a test fails or a defect is discovered:
+
+1. Determine whether the affected implementation changed in this milestone.
+2. Reproduce the failure against the agreed baseline when feasible.
+3. Determine whether the milestone introduced, worsened, or newly exposed the failure.
+4. Report pre-existing and newly introduced failures separately.
+
+An independently verified, unchanged baseline defect should not automatically be classified as a milestone implementation failure.
+
+However, never conceal or silently ignore baseline failures. Record their effect on formal CI and merge gates, and require explicit approval for any exception.
+
+### 3. Use risk-based severity
+
+Block milestone approval for verified, materially significant defects involving correctness, security, authorization, tenant isolation, data integrity, or reliability within the milestone's scope.
+
+Do not classify subjective stylistic preferences or speculative architectural improvements as blocking defects without demonstrating a concrete risk or violation of agreed requirements.
+
+Apply severity consistently and prioritize actionable findings.
+
+### 4. Keep reviews focused but independent
+
+Review the actual implementation, not only the Builder's report.
+
+Independently reproduce critical findings whenever practical.
+
+Review fixes for regressions and affected invariants, but do not repeatedly audit unrelated unchanged code without a concrete reason.
+
+Continue to examine adjacent code when a cross-boundary risk exists.
+
+### 5. Separate three levels of approval
+
+**Implementation approval:** The milestone's code and in-scope acceptance criteria meet the agreed standard.
+
+**Merge approval:** Implementation is acceptable and repository quality gates are satisfied, including explicitly authorized exceptions.
+
+**Production readiness:** Live integrations, deployment, security, performance, and operational requirements have been verified in the intended environment.
+
+Never conflate these decisions.
+
+### 6. Final review report
+
+Include:
+
+- Reviewed baseline and commit SHA.
+- Scope of review.
+- Verified blocking defects.
+- Non-blocking findings.
+- Known pre-existing defects.
+- Tests independently executed and results.
+- Remaining merge conditions.
+- Remaining production-readiness gates.
+- Explicit final decision with supporting evidence.
+
+This review remains read-only: do not modify files. A remediation assignment is a separate Builder task.
