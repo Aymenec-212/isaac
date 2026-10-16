@@ -35,9 +35,33 @@ jobs:
       - run: uv sync --frozen --extra dev --extra moshi-server
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync mypy
+      - run: uv run --no-sync mypy tools/m1_merge_exception.py
       - run: uv run --no-sync python -m unittest discover -s ../deploy/asr -p 'test_*.py' -v
       - run: uv run --no-sync alembic upgrade head
-      - run: uv run --no-sync pytest tests/unit tests/integration tests/realtime -q -rs
+      - run: uv run --no-sync alembic check
+      # M2-ASR-001: executes the exact baseline test under a strict, opt-in
+      # known-assertion XFAIL. No continue-on-error, filtering or skipped body.
+      - run: >-
+          uv run --no-sync pytest -p tools.m1_merge_exception
+          tests/unit tests/integration tests/realtime -q -rxXs
+          --junitxml=test-results/backend.xml
+      - name: Explain the human-approved baseline exception
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### M1 merge exception — M2-ASR-001
+          The full selected backend suite runs. Only the known silent-allocation
+          assertion in `tests/realtime/test_idle_and_pause.py::test_a_silent_participant_does_not_claim_the_recognizer_stream`
+          may be reported **XFAIL** under the explicit human approval in `docs/QUALITY_GATES.md`.
+          A pass (strict XPASS), changed error, fixture error or any additional
+          failing test fails the job. See console results and the backend JUnit artifact.
+          This exception is not production-readiness approval.
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-verification
+          path: backend/test-results/backend.xml
   browser:
     runs-on: ubuntu-latest
     services:

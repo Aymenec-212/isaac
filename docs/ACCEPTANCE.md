@@ -93,3 +93,16 @@ No later-milestone criterion changes status. The local browser fixture seeds ser
 sessions directly in a disposable database; it is not a provider login bypass in the
 application and does not prove real Auth0 acceptance. See [operations](M1_OPERATIONS.md)
 for configuration, recovery-event delivery, session/meeting continuity and legacy gates.
+
+
+### M1 merge preparation — explicit baseline exception
+
+The human owner reports independent approval of implementation
+`ebef4684f982f063c737deaf76cf8b65e71d32c7` with no unresolved M1 defects.
+The sole pre-existing silent-participant ASR failure has an explicit, test-specific
+[human-approved M1 merge exception](QUALITY_GATES.md#m1-only-baseline-exception--m2-asr-001)
+and tracked [M2-ASR-001](follow-ups/M2-ASR-001.md) follow-up. It remains executed and
+visible as strict XFAIL in CI; ordinary pytest still fails. Hosted CI/PG16 and real
+Auth0/operational migration gates remain unverified. The implemented/not-verified
+full acceptance statuses above are not promoted to production verification by this
+merge preparation. See the latest [build evidence](reports/M1_DESKTOP_BUILD_REPORT.md).

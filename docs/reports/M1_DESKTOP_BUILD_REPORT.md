@@ -4,7 +4,7 @@
 - Original implementation commit: `1821d4fe9d4924b7f21340c55183bdb5d4aaf9a6`.
 - Starting checkout: `5fbe92b7c8fb241ab020f1196afa646d583991a3` (`codex/m1-saas`).
 - Approved M0/main: `51165577958dbedca74e14067bf9e1c6b31ff324`, unchanged.
-- Status: **Independent review confirmed the first three fixes, then found a profile/logout-all deadlock. Its focused repair is submitted for re-review; complete M1 acceptance remains unverified. Not approved for merge or pilot operation.**
+- Status: **Independent Reviewer approved implementation `ebef468`; no unresolved M1 defects. Human authorized the exact pre-existing ASR test exception for M1 merge. Hosted checks remain to execute; production/pilot readiness is not approved.**
 - Scope: AUTH-01..04, persistent meeting metadata/access scaffold, OPS-02 foundation.
   No M2 media, M3 intelligence, M4 integration or M5 release-readiness implementation.
 - Environment: macOS arm64, Python 3.12.9, uv 0.9.26, Node 23.7.0, PostgreSQL **14.19**.
@@ -295,7 +295,7 @@ Starting review commit: `252be30c3fa77340b86ae225025c8645419cdb19`, clean checko
 on `codex/m1-saas-desktop`. The independent Reviewer confirmed all three earlier
 findings resolved, then reproduced a new account/session deadlock. This section
 supersedes the prior self-review's claim that the full lock order was consistent.
-The commit containing this follow-up is the new review target. Scope: AUTH-01 and
+Repair commit: `ebef4684f982f063c737deaf76cf8b65e71d32c7` (subsequently independently approved). Scope: AUTH-01 and
 OPS-02; no schema/API changes, M2 work, frontend changes or ASR modifications.
 
 | Finding | Status / files | Proof and remaining limits |
@@ -387,9 +387,97 @@ security fix. No ASR source or tests are changed here and no failure is suppress
 Re-review the explicit account-before-session locks, compatible lock strength,
 post-wait session refresh, profile/logout ordering tests, callback fences and the
 path audit above. No migration is introduced. The earlier three findings remain
-resolved per the independent Reviewer; this follow-up awaits independent approval.
+resolved per the independent Reviewer; the human has now confirmed independent approval of this repair at `ebef468`.
 M1 is **not declared complete**. Live Auth0 registration/recovery/event delivery,
 approved provider provisioning/region/cost, hosted CI/Linux/PG16 and sanitized
 operational migration/backup/rollback/old-process-drain verification remain gates.
 The pre-existing ASR failure and dependency advisories remain documented blockers.
 No push, merge, deployment or external writes occurred.
+
+
+## M1 merge preparation — human-approved baseline exception
+
+The human owner confirmed independent approval of
+`ebef4684f982f063c737deaf76cf8b65e71d32c7`, with no unresolved M1 defects, and
+explicitly authorized only the independently verified M0 silent-participant ASR
+failure as an M1 merge exception. The latest status supersedes earlier pending-review
+statements; [QUALITY_GATES](../QUALITY_GATES.md#m1-only-baseline-exception--m2-asr-001)
+records the exact test, authority, reason, limits and production-readiness distinction.
+[M2-ASR-001](../follow-ups/M2-ASR-001.md) is a tracked **open** follow-up, assigned to
+M2 lifecycle work with closure evidence; no M2 implementation is started.
+
+The existing generic reviewer-prompt edit was inspected and committed separately as
+`4d57679` (`docs: distinguish milestone review and merge readiness`). It keeps reviews
+independent and read-only, distinguishes baseline defects from new regressions, and
+separates implementation/merge/production approval. Its prior final-gate sentence
+was reconciled with explicit human exceptions without adding an M1-specific waiver
+to the generic prompt.
+
+Merge preparation changes only CI, its opt-in exception policy/tests and docs.
+`tools/m1_merge_exception.py` uses pytest strict XFAIL for the exact node and only
+the original silent-allocation assertion, leaving the legacy test body and ASR
+implementation unchanged. Different failures in that same test remain fatal. Ten
+subprocess policy cases exercise known failure, default raw failure, strict XPASS,
+changed assertion, runtime/setup/teardown errors, another failing test, and absent
+or duplicate collection. Expected failures are visible in `-rxXs`, JUnit and the
+workflow summary; no job-wide continue-on-error or hidden deselection is used.
+
+### CI configuration inspection
+
+| GitHub Actions job | Configured checks |
+|---|---|
+| `backend` (Ubuntu, Python 3.12, **postgres:16**) | Frozen dev/protocol dependencies; Ruff; application mypy and explicit exception-plugin mypy; all five offline deployment-security tests; actual Alembic 0001→head upgrade and schema drift check; selected unit/integration/realtime suite including concurrency/authorization/migration tests, ten policy cases and the executed strict expected baseline failure; always-uploaded JUnit and explicit exception summary. |
+| `browser` (Ubuntu, Node 24, Python 3.12, **postgres:16**) | Frozen backend dependencies and `npm ci`; frontend ESLint, TypeScript, unit/contrast checks and production build; both OpenAPI exports plus generated TypeScript contract drift checks; real Alembic upgrade; Chromium install; SaaS and all legacy prototype Playwright suites; failure traces/artifacts. |
+
+Both jobs run on push/pull request without a dependency that could suppress one
+because the other failed. No workflow/step failure is globally tolerated. As usual,
+a failed prerequisite can prevent later dependent steps; it still fails its job.
+The existing opt-in real MLX test and slow-marker exclusion are unchanged and are
+not new exceptions. Real GPU/provider evidence remains separately gated.
+
+Local workflow validation uses pinned **actionlint 1.7.7** (PASS). It validates
+workflow syntax, expressions, job/step structure and action inputs; ShellCheck is
+not installed locally, so it does not provide a separate shell-lint claim. The only
+new shell block is the literal job-summary heredoc. Local evidence uses PG **14.19**,
+not PG16. The fresh synthetic migration database and test cluster remain disposable.
+Logs/JUnit: `/tmp/mosaique-m1-merge-prep/`; policy-only log also at
+`/tmp/m1-exception-policy.txt`.
+
+### Executed merge-preparation evidence
+
+| Check | Actual result |
+|---|---|
+| Full configured backend suite with explicit plugin and JUnit (local `.venv/bin/pytest -p tools.m1_merge_exception tests/unit tests/integration tests/realtime -q -rxXs --junitxml=...`) | **538 passed, 1 xfailed, 1 skipped, 1 deselected**, existing Authlib warning, 105.91s; exit 0. The only XFAIL is the authorized exact assertion. The skip is the unchanged opt-in real MLX test; slow deselection is unchanged. |
+| Raw exact legacy test without plugin | **1 failed** as expected, 0.82s, pytest exit 1; confirms unchanged execution/failure rather than a hidden skip |
+| Exception policy alone, final source | **10 passed**, 2.27s; validates failed/XPASS/missing/duplicate/fixture/other-regression cases remain fatal and default invocation retains failure. |
+| Actual backend JUnit inspection | PASS; no `<failure>`/`<error>` entries, exactly the named baseline case has `skipped type="pytest.xfail"` and explicit human-approved/M2-ASR-001 reason. |
+| Ruff / application mypy / explicit plugin mypy | PASS / PASS (116 source files) / PASS (1 source file). Explicit plugin check is also configured in Actions. |
+| Frontend ESLint / TypeScript / unit+contrast / build | PASS; **115 tests / 15 files**, 43 contrast pairs pass with the same three documented gaps. No frontend source changes. |
+| Fresh synthetic UTF-8 database: Alembic 0001→0006 upgrade / `alembic check` | PASS / no new upgrade operations detected on local PG14.19 |
+| Offline deployment security unittest | **5 passed**, 0.003s |
+| Final workflow `actionlint` 1.7.7 | PASS, exit 0; hosted jobs themselves not executed |
+| Git diff / legacy ASR/test comparison | PASS; no application or legacy ASR/test changes; main unchanged. Generated frontend build metadata restored. |
+
+No new application regression was found. An early synthetic duplicate-node policy
+case used duplicate CLI node arguments that pytest deduplicates; the policy test
+was corrected to request actual duplicate file collection with `--keep-duplicates`.
+All ten cases now pass. An explicit plugin mypy check identified an overly narrow
+callback parameter annotation; it was widened to `BaseException` (pytest already
+restricts it to `AssertionError`) without changing predicate behavior, and the final
+policy/type checks pass. These were preparation-check corrections, not hidden app
+failures. Browser suites are configured unchanged and were not rerun in this
+docs/CI-only pass; their previously reported 29 passing journeys remain historical.
+
+A concise proposed PR description is saved in [M1_PR_DESCRIPTION.md](M1_PR_DESCRIPTION.md).
+
+Hosted GitHub execution is still **NOT RUN**: Linux runner/action execution, PG16,
+Node 24/browser installation, artifact/summary rendering and required-check results
+must be confirmed after an authorized push/PR. Repository branch-protection settings
+must require the `backend` and `browser` jobs of `Verify`; those settings were not
+changed or claimed verified locally. No push, PR creation or merge occurred here.
+
+Real Auth0 hosted registration/login/recovery, revocation-event delivery and approved
+provider region/cost, sanitized operational migration/restore/rollback and old-process
+draining remain deployment/pilot gates. This merge exception does not waive them or
+claim full live acceptance. No ASR code/test weakening, deployment or unrelated
+application change was made.

@@ -19,6 +19,11 @@ Account identity, multi-organization membership, invitations, authorization, cor
 ## M2 — LiveKit + Pipecat + concurrent Voxtral
 Authenticated room tokens; two-user real meeting and browser controls; isolated per-participant audio pipelines; shared inference engine; live attributed transcript. Record overlaps, lifecycle/failure handling and actual GPU benchmarks under approved credentials/budget. Do not claim M2 complete without honest integration evidence.
 
+Tracked M2 lifecycle follow-up: [M2-ASR-001](follow-ups/M2-ASR-001.md), the
+independently verified silent-participant allocation defect. M1 has an explicit
+human-approved merge exception only; M2 must resolve it and retire the CI exception.
+This tracking entry does not start M2 implementation.
+
 ## M3 — Durable meeting intelligence
 Final transcript lifecycle, meeting history, corrections/search, async summary, evidence-backed structured decisions/actions, review and approval UX, recovery/idempotent jobs.
 
