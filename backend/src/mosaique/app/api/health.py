@@ -125,6 +125,22 @@ def _probe_llm(settings: Settings) -> Probe:
 
 
 async def _dependencies(settings: Settings) -> list[DependencyHealth]:
+    if settings.application_mode == "enterprise":
+
+        async def identity_configuration() -> DependencyHealth:
+            configured = bool(settings.oidc_issuer)
+            return DependencyHealth(
+                name="identity",
+                state="ok" if configured else "unavailable",
+                detail="OIDC configured; provider not probed"
+                if configured
+                else "Configure the approved identity provider before sign-in",
+                gates_readiness=True,
+            )
+
+        return await probe_all(
+            {"database": (_probe_database, True), "identity": (identity_configuration, True)}
+        )
     return await probe_all(
         {
             "database": (_probe_database, True),

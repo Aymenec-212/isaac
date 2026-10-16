@@ -2,7 +2,7 @@
 
 Caller owns one transaction and must commit/rollback it. Async callers can use
 AsyncSession.run_sync. Account IDs MUST come from a validated server session,
-never request bodies or legacy bearer claims. No public route is wired yet.
+never request bodies or legacy bearer claims.
 All membership mutations lock the organization first, serializing invitation
 redemption, role changes and revocation on PostgreSQL.
 """
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -20,7 +21,8 @@ from sqlalchemy.orm import Session
 from mosaique.domain.errors import ErrorCode, Forbidden, InvalidToken, MosaiqueError, NotFound
 from mosaique.domain.ids import new_id
 from mosaique.persistence.models import Organization
-from mosaique.persistence.models.identity import Account, Invitation, Membership
+from mosaique.persistence.models.identity import Account, Invitation, MeetingAccess, Membership
+from mosaique.workspaces.audit import record
 
 Role = Literal["owner", "admin", "member"]
 
@@ -58,14 +60,14 @@ class Workspaces:
             raise NotFound("Workspace not found")
         return membership
 
-    def _lock(self, organization_id: str) -> None:
+    def lock(self, organization_id: str) -> None:
         org = self.db.scalar(
             select(Organization).where(Organization.id == organization_id).with_for_update()
         )
         if org is None:
             raise NotFound("Workspace not found")
 
-    def _manager(self, account_id: str, organization_id: str) -> Membership:
+    def authorize_manager(self, account_id: str, organization_id: str) -> Membership:
         member = self.authorize(account_id, organization_id)
         if member.role not in ("owner", "admin"):
             raise Forbidden("Workspace manager required")
@@ -81,6 +83,7 @@ class Workspaces:
         self.db.flush()
         self.db.add(Membership(organization_id=org.id, account_id=account_id, role="owner"))
         self.db.flush()
+        record(self.db, org.id, account_id, "workspace.created", org.id)
         return org
 
     def list(self, account_id: str) -> list[Organization]:
@@ -95,23 +98,25 @@ class Workspaces:
         )
 
     def rename(self, account_id: str, organization_id: str, name: str) -> None:
-        self._lock(organization_id)
-        self._manager(account_id, organization_id)
+        self.lock(organization_id)
+        self.authorize_manager(account_id, organization_id)
         name = name.strip()
         if not name or len(name) > 200:
             raise MosaiqueError(ErrorCode.VALIDATION_FAILED, "Workspace name is required (max 200)")
         org = self.db.get(Organization, organization_id)
         assert org is not None
         org.name = name
+        record(self.db, organization_id, account_id, "workspace.renamed", organization_id)
         self.db.flush()
 
     def invite(self, account_id: str, organization_id: str, email: str) -> str:
-        self._lock(organization_id)
-        self._manager(account_id, organization_id)
+        self.lock(organization_id)
+        self.authorize_manager(account_id, organization_id)
         token = secrets.token_urlsafe(32)
+        invitation_id = new_id()
         self.db.add(
             Invitation(
-                id=new_id(),
+                id=invitation_id,
                 organization_id=organization_id,
                 invited_by=account_id,
                 email=_email(email),
@@ -120,6 +125,7 @@ class Workspaces:
             )
         )
         self.db.flush()
+        record(self.db, organization_id, account_id, "invitation.created", invitation_id)
         # Only returned to the inviting caller; no email/provider write here.
         return token
 
@@ -128,7 +134,7 @@ class Workspaces:
         invite = self.db.scalar(select(Invitation).where(Invitation.token_hash == _hash(token)))
         if invite is None:
             raise NotFound("Invitation unavailable")
-        self._lock(invite.organization_id)
+        self.lock(invite.organization_id)
         invite = self.db.scalar(
             select(Invitation)
             .where(Invitation.token_hash == _hash(token))
@@ -142,7 +148,7 @@ class Workspaces:
         if not account.email_verified or _email(account.email) != invite.email:
             raise Forbidden("Sign in with the verified invited address")
         # Losing invitation privileges invalidates outstanding invitations.
-        self._manager(invite.invited_by, invite.organization_id)
+        self.authorize_manager(invite.invited_by, invite.organization_id)
         member = self.db.get(
             Membership, (invite.organization_id, account_id), populate_existing=True
         )
@@ -157,6 +163,7 @@ class Workspaces:
             member.role = "member"
         # Redeeming a duplicate invite must never demote an existing owner/admin.
         invite.redeemed_at = now
+        record(self.db, invite.organization_id, account_id, "invitation.accepted", invite.id)
         self.db.flush()
         org = self.db.get(Organization, invite.organization_id)
         assert org is not None
@@ -168,7 +175,7 @@ class Workspaces:
         """Owner sets a role or revokes (None), preserving the last active owner."""
         if role not in (None, "owner", "admin", "member"):
             raise MosaiqueError(ErrorCode.VALIDATION_FAILED, "Invalid workspace role")
-        self._lock(organization_id)
+        self.lock(organization_id)
         actor = self.authorize(actor_id, organization_id)
         if actor.role != "owner":
             raise Forbidden("Workspace owner required")
@@ -196,6 +203,12 @@ class Workspaces:
         if role is None:
             target.revoked_at = datetime.now(UTC)
             self.db.execute(
+                delete(MeetingAccess).where(
+                    MeetingAccess.organization_id == organization_id,
+                    MeetingAccess.account_id == target_id,
+                )
+            )
+            self.db.execute(
                 delete(Invitation).where(
                     Invitation.organization_id == organization_id,
                     Invitation.email == _email(account.email),
@@ -204,6 +217,7 @@ class Workspaces:
             )
         else:
             target.role = role
+        record(self.db, organization_id, actor_id, f"membership.{role or 'revoked'}", target_id)
         if role not in ("owner", "admin"):
             # Old invitations must not revive if the inviter is later restored.
             self.db.execute(
@@ -213,4 +227,35 @@ class Workspaces:
                     Invitation.redeemed_at.is_(None),
                 )
             )
+        self.db.flush()
+
+    def invitations(self, actor: str, org: str) -> Sequence[Invitation]:
+        self.authorize_manager(actor, org)
+        return list(
+            self.db.scalars(
+                select(Invitation)
+                .where(
+                    Invitation.organization_id == org,
+                    Invitation.redeemed_at.is_(None),
+                    Invitation.expires_at > datetime.now(UTC),
+                )
+                .order_by(Invitation.created_at.desc())
+                .limit(100)
+            )
+        )
+
+    def revoke_invitation(self, actor: str, org: str, invitation_id: str) -> None:
+        self.lock(org)
+        self.authorize_manager(actor, org)
+        invite = self.db.scalar(
+            select(Invitation).where(
+                Invitation.id == invitation_id,
+                Invitation.organization_id == org,
+                Invitation.redeemed_at.is_(None),
+            )
+        )
+        if invite is None:
+            raise NotFound("Invitation unavailable")
+        self.db.delete(invite)
+        record(self.db, org, actor, "invitation.revoked", invitation_id)
         self.db.flush()

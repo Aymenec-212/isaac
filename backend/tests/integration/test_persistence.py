@@ -54,7 +54,7 @@ async def test_every_tenant_owned_table_has_organization_id():
         assert "organization_id" in table.columns, f"{name} is missing organization_id"
 
 
-async def test_all_eight_tables_exist_in_migration_one():
+async def test_legacy_tables_remain_alongside_additive_identity_tables():
     from mosaique.persistence.models import Base
 
     assert set(Base.metadata.tables) == {
@@ -66,4 +66,12 @@ async def test_all_eight_tables_exist_in_migration_one():
         "transcript_segments",
         "meeting_outputs",
         "jobs",
+        "accounts",
+        "memberships",
+        "workspace_invitations",
+        "account_sessions",
+        "login_attempts",
+        "meeting_access",
+        "workspace_audit",
+        "revoked_provider_sessions",
     }

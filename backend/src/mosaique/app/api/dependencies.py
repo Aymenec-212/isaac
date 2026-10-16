@@ -27,7 +27,8 @@ async def get_session() -> AsyncIterator[AsyncSession]:
             raise
 
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
+# Commit before sending a success response; commit failures must remain HTTP failures.
+SessionDep = Annotated[AsyncSession, Depends(get_session, scope="function")]
 
 
 async def get_principal(

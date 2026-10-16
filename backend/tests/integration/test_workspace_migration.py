@@ -1,6 +1,6 @@
 """Real PostgreSQL M1 rehearsal, isolated in a transaction that always rolls back.
 
-No metadata.create_all shortcut: apply the actual 0001..0004 migration functions.
+No metadata.create_all shortcut: apply the actual 0001..0005 migration functions.
 This is not Auth0/browser or concurrent-lock evidence.
 """
 
@@ -88,7 +88,10 @@ def test_migration_preserves_legacy_and_workspace_persists(settings):
                 def snapshot():
                     return {
                         table: connection.execute(
-                            text(f"SELECT to_jsonb(t)::text FROM {table} t ORDER BY id")
+                            text(
+                                "SELECT (to_jsonb(t) - 'mode' - 'organizer_account_id')::text "
+                                f"FROM {table} t ORDER BY id"
+                            )
                         )
                         .scalars()
                         .all()
@@ -98,6 +101,11 @@ def test_migration_preserves_legacy_and_workspace_persists(settings):
                 before = snapshot()
                 apply_revision(connection, "0004")
                 assert snapshot() == before
+                apply_revision(connection, "0005")
+                assert snapshot() == before
+                from alembic.autogenerate import compare_metadata
+
+                assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
                 with Session(bind=connection, join_transaction_mode="create_savepoint") as db:
                     owner = Account(
                         id=new_id(),

@@ -51,6 +51,7 @@ class MeetingRepository:
         stmt = select(Meeting).where(
             Meeting.id == meeting_id,
             Meeting.organization_id == self._organization_id,
+            Meeting.mode == "legacy",
         )
         if for_update:
             stmt = stmt.with_for_update().execution_options(populate_existing=True)
@@ -59,7 +60,7 @@ class MeetingRepository:
     async def list(self, *, limit: int = 50, offset: int = 0) -> Sequence[Meeting]:
         stmt = (
             select(Meeting)
-            .where(Meeting.organization_id == self._organization_id)
+            .where(Meeting.organization_id == self._organization_id, Meeting.mode == "legacy")
             .order_by(Meeting.created_at.desc())
             .limit(limit)
             .offset(offset)

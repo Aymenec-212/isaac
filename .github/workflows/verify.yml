@@ -1,0 +1,91 @@
+name: Verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mosaique
+          POSTGRES_PASSWORD: mosaique
+          POSTGRES_DB: mosaique_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U mosaique" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      MOSAIQUE_DATABASE_URL: postgresql+asyncpg://mosaique:mosaique@localhost:5432/mosaique_test
+      MOSAIQUE_TEST_DATABASE_URL: postgresql+asyncpg://mosaique:mosaique@localhost:5432/mosaique_test
+      MOSAIQUE_TOKEN_SECRET: ci-only-dummy-signing-value-at-least-32-characters
+      MOSAIQUE_ENVIRONMENT: ci
+      MOSAIQUE_ASR_RUNTIME: fake
+      MOSAIQUE_LLM_PROVIDER: fake
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.9.26'
+          python-version: '3.12'
+      - run: uv sync --frozen --extra dev --extra moshi-server
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync mypy
+      - run: uv run --no-sync alembic upgrade head
+      - run: uv run --no-sync pytest tests/unit tests/integration tests/realtime -q -rs
+  browser:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mosaique
+          POSTGRES_PASSWORD: mosaique
+          POSTGRES_DB: mosaique_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U mosaique" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      MOSAIQUE_DATABASE_URL: postgresql+asyncpg://mosaique:mosaique@localhost:5432/mosaique_test
+      MOSAIQUE_TOKEN_SECRET: ci-only-dummy-signing-value-at-least-32-characters
+      MOSAIQUE_ENVIRONMENT: ci
+      MOSAIQUE_ASR_RUNTIME: fake
+      MOSAIQUE_LLM_PROVIDER: fake
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.9.26'
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: uv sync --project ../backend --frozen --extra dev --extra moshi-server
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: ../backend/.venv/bin/python ../backend/tools/export_openapi.py openapi.json prototype
+      - run: ../backend/.venv/bin/python ../backend/tools/export_openapi.py saas-openapi.json enterprise
+      - run: npm run generate:api && npm run generate:saas-api
+      - run: git diff --exit-code -- openapi.json saas-openapi.json src/api/schema.d.ts src/saas/schema.d.ts
+      - run: cd ../backend && .venv/bin/alembic upgrade head
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:saas
+      - run: npm run test:e2e:prototype
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure
+          path: frontend/test-results

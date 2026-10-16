@@ -21,7 +21,18 @@ def db(tmp_path):
     def foreign_keys(connection, _):
         connection.execute("PRAGMA foreign_keys=ON")
 
-    for model in (Organization, Account, Membership, Invitation):
+    from mosaique.persistence.models import Meeting
+    from mosaique.persistence.models.identity import MeetingAccess, WorkspaceAudit
+
+    for model in (
+        Organization,
+        Account,
+        Membership,
+        Invitation,
+        Meeting,
+        MeetingAccess,
+        WorkspaceAudit,
+    ):
         model.__table__.create(engine)
     with Session(engine) as session:
         yield session
@@ -285,6 +296,7 @@ def test_migration_is_additive_and_matches_new_model_tables():
             metadata = MetaData(naming_convention=Organization.metadata.naming_convention)
             for model in (Organization, Account, Membership, Invitation):
                 model.__table__.to_metadata(metadata)
+            metadata.tables["accounts"]._columns.remove(metadata.tables["accounts"].c.display_name)
             context = MigrationContext.configure(connection, opts={"target_metadata": metadata})
             with Operations.context(context):
                 module.upgrade()

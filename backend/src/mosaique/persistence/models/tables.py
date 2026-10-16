@@ -15,6 +15,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -74,15 +75,32 @@ class Meeting(Base):
         CheckConstraint(_in("state", MEETING_STATES), name="state_valid"),
         CheckConstraint(_in("source_kind", SOURCE_KINDS), name="source_kind_valid"),
         Index("ix_meetings_org_created", "organization_id", "created_at"),
+        UniqueConstraint("organization_id", "id", name="uq_meetings_org_id"),
+        ForeignKeyConstraint(
+            ["organization_id", "organizer_account_id"],
+            ["memberships.organization_id", "memberships.account_id"],
+            name="fk_meetings_organizer_membership",
+        ),
+        CheckConstraint("mode IN ('legacy', 'enterprise')", name="mode_valid"),
+        CheckConstraint(
+            "(mode = 'legacy' AND host_user_id IS NOT NULL AND organizer_account_id IS NULL) "
+            "OR (mode = 'enterprise' AND organizer_account_id IS NOT NULL "
+            "AND host_user_id IS NULL)",
+            name="identity_mode_valid",
+        ),
     )
 
     id: Mapped[str] = ulid_pk()
     organization_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    host_user_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    host_user_id: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
+    mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="legacy", server_default="legacy"
+    )
+    organizer_account_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="CREATED")
     language: Mapped[str] = mapped_column(String(8), nullable=False, default="fr")

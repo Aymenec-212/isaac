@@ -73,3 +73,23 @@ criterion statuses above remain unchanged. Auth0, HTTP/session/browser flows,
 enterprise meeting access and real PostgreSQL migration/concurrency verification
 remain outstanding. Legacy prototype credentials do not authorize these accounts.
 M1 is not done and no later milestone has started.
+
+### M1 Desktop implementation — 16 October 2026
+
+The [Desktop build report](reports/M1_DESKTOP_BUILD_REPORT.md) supersedes the earlier
+backend-only increment report for current M1 status. Human approval selected Auth0,
+PKCE, server-owned sessions/tenancy, verified single-use revocable invitations and
+30-minute idle/12-hour absolute defaults. No provisioning/live credentials are approved.
+
+| IDs | Complete criterion status | Observed increment / remaining gate |
+|---|---|---|
+| AUTH-01 | implemented/not verified | Signed deterministic OIDC validation, cookie rotation/logout/revocation/expiry, profile persistence; Auth0 hosted registration/recovery and real two-account login not run |
+| AUTH-02 | implemented/not verified | Actual PostgreSQL HTTP and local two-account browser workspace/invitation journey; real-provider account onboarding remains unverified |
+| AUTH-03 | implemented/not verified | API IDOR/private-meeting grants/org switching and database constraints tested; enterprise mounts no prototype WS/token/job surface. Future M2/M3 surfaces require their own tests |
+| AUTH-04 | implemented/not verified | Removed members lose HTTP meeting access and grants; re-invite does not restore grants. LiveKit issuance/revocation remains explicitly M2 |
+| OPS-02 | implemented/not verified | Lint/type repairs, real verification workflow and local commands exist. Hosted CI/PG16 not executed; known prototype regression remains red |
+
+No later-milestone criterion changes status. The local browser fixture seeds server
+sessions directly in a disposable database; it is not a provider login bypass in the
+application and does not prove real Auth0 acceptance. See [operations](M1_OPERATIONS.md)
+for configuration, recovery-event delivery, session/meeting continuity and legacy gates.

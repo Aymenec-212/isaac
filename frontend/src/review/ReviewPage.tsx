@@ -260,7 +260,7 @@ export function ReviewPage({ meetingId, onBack }: { meetingId: string; onBack: (
   // otherwise the whole thing. Citations always resolve against the *full*
   // transcript, so clicking a decision still works mid-search.
   const searching = results !== null;
-  const shownSegments = searching ? results.segments : (transcript?.segments ?? []);
+  const shownSegments = useMemo(() => results !== null ? results.segments : (transcript?.segments ?? []), [results, transcript?.segments]);
   const summary = searching
     ? resultSummary(results.segments.length, results.total_segments ?? 0, results.query ?? "")
     : "";

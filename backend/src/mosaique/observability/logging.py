@@ -27,7 +27,18 @@ def _add_correlation_ids(
     return event_dict
 
 
+class RedactAccessQuery(logging.Filter):
+    """Uvicorn otherwise logs OIDC authorization codes in the callback query."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and len(record.args) == 5:
+            client, method, path, version, status = record.args
+            record.args = (client, method, str(path).split("?", 1)[0], version, status)
+        return True
+
+
 def configure_logging(level: str = "INFO", *, json_output: bool = True) -> None:
+    logging.getLogger("uvicorn.access").addFilter(RedactAccessQuery())
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level)
     renderer = (
         structlog.processors.JSONRenderer() if json_output else structlog.dev.ConsoleRenderer()
