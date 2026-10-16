@@ -61,3 +61,15 @@ checks are NOT RUN; M2 acceptance remains gated on authorization and real eviden
 - M5 Hardening: OPS-01..03 and release/pilot readiness review.
 
 CI coverage and required live checks may evolve; changes to acceptance criteria require an explained, reviewed update, not quiet weakening.
+
+### M1 workspace persistence increment — 16 October 2026
+
+[M1 builder evidence](reports/M1_BUILD_REPORT.md) records a **partial** backend-only
+increment supporting AUTH-02..04: application-owned account/membership tables,
+workspace operations, expiring single-use invitations and revocation/role checks.
+Deterministic SQLite tests verify this module's behavior, not the complete criteria.
+No complete AUTH criterion is implemented/verified by this increment; the full
+criterion statuses above remain unchanged. Auth0, HTTP/session/browser flows,
+enterprise meeting access and real PostgreSQL migration/concurrency verification
+remain outstanding. Legacy prototype credentials do not authorize these accounts.
+M1 is not done and no later milestone has started.

@@ -21,6 +21,7 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "mosaique"
 # Layers that must remain ignorant of how audio arrived.
 DOWNSTREAM_OF_INGRESS = [
     "domain",
+    "workspaces",
     "transcript",
     "intelligence",
     "persistence",
@@ -198,3 +199,13 @@ def test_the_default_install_pulls_in_no_model_library():
         if any(requirement.lower().startswith(name) for name in MODEL_MODULES)
     ]
     assert not leaked, f"a model library reached the default install: {leaked}"
+
+
+def test_workspaces_does_not_import_provider_or_transport_clients():
+    banned = HTTP_CLIENT_MODULES | {"authlib", "livekit", "pipecat", "vllm", "modal"}
+    offenders = {
+        str(path.relative_to(SRC)): sorted(imported_modules(path) & banned)
+        for path in python_files("workspaces")
+        if imported_modules(path) & banned
+    }
+    assert not offenders
